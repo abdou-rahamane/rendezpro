@@ -55,9 +55,17 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const statusFilter = searchParams.get("status")
+    const from = searchParams.get("from")
+    const to = searchParams.get("to")
 
     const where: any = { userId: session.user.id }
     if (statusFilter) where.statut = statusFilter
+    if (from || to) {
+      where.date = {
+        ...(from ? { gte: new Date(from) } : {}),
+        ...(to ? { lte: new Date(to) } : {}),
+      }
+    }
 
     const bookings = await prisma.booking.findMany({
       where,
