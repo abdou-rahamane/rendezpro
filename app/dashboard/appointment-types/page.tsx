@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar, Clock, Menu, Home, CalendarDays, UserCheck, FileText, BarChart3, Link2, Settings, Plus, Copy, ExternalLink, Video, MapPin, Euro, Pencil } from "lucide-react";
+import { Calendar, Clock, Menu, Home, CalendarDays, UserCheck, FileText, BarChart3, Link2, Settings, Plus, Copy, ExternalLink, Video, MapPin, Euro, Pencil, Users, User } from "lucide-react";
 import { toast } from "sonner";
 
 const navigationItems = [
@@ -21,10 +21,10 @@ const navigationItems = [
   { name: "Disponibilités", icon: Clock, href: "/dashboard/availability" },
   { name: "Analytics", icon: BarChart3, href: "/dashboard/analytics" },
   { name: "Intégrations", icon: Link2, href: "/dashboard/integrations" },
-  { name: "Paramètres", icon: Settings, href: "/dashboard/settings" },
+  { name: "Profil", icon: Settings, href: "/dashboard/profile" },
 ];
 
-const EMPTY_FORM = { name: "", description: "", duration: "30", price: "0", location: "Visioconférence" };
+const EMPTY_FORM = { name: "", description: "", duration: "30", price: "0", location: "Visioconférence", typeRDV: "", maxParticipants: "", heureFixe: "" };
 
 export default function AppointmentTypesPage() {
   const { data: session, status } = useSession();
@@ -57,6 +57,16 @@ export default function AppointmentTypesPage() {
     if (!form.name.trim()) return;
     setSaving(true);
     try {
+      if (!form.typeRDV) {
+        toast.error("Veuillez sélectionner le type de RDV (individuel ou collectif)");
+        setSaving(false);
+        return;
+      }
+      if (form.typeRDV === 'collectif' && (!form.maxParticipants || parseInt(form.maxParticipants) < 2)) {
+        toast.error("Un RDV collectif doit avoir au moins 2 participants");
+        setSaving(false);
+        return;
+      }
       const res = await fetch("/api/event-types", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -66,10 +76,13 @@ export default function AppointmentTypesPage() {
           duration: parseInt(form.duration),
           price: parseFloat(form.price) || 0,
           location: form.location,
+          typeRDV: form.typeRDV,
+          maxParticipants: form.typeRDV === 'collectif' ? parseInt(form.maxParticipants) : undefined,
+          heureFixe: form.typeRDV === 'collectif' && form.heureFixe ? form.heureFixe : undefined,
         }),
       });
       if (res.ok) {
-        toast.success("Type de RDV créé !");
+        toast.success(`Type de RDV ${form.typeRDV} créé !`);
         setForm(EMPTY_FORM);
         setShowForm(false);
         loadEventTypes();
@@ -171,6 +184,17 @@ export default function AppointmentTypesPage() {
                       {et.lieu?.toLowerCase().includes("visio") ? <Video className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
                       {et.lieu}
                     </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className={et.typeRDV === 'collectif' ? 'border-purple-300 text-purple-700 bg-purple-50' : 'border-blue-300 text-blue-700 bg-blue-50'}>
+                        {et.typeRDV === 'collectif' ? <Users className="w-3 h-3 mr-1" /> : <User className="w-3 h-3 mr-1" />}
+                        {et.typeRDV === 'collectif' ? `Collectif (max ${et.maxParticipants})` : 'Individuel'}
+                      </Badge>
+                      {et.typeRDV === 'collectif' && et.heureFixe && (
+                        <Badge variant="outline" className="border-orange-300 text-orange-700 bg-orange-50">
+                          <Clock className="w-3 h-3 mr-1" />{et.heureFixe}
+                        </Badge>
+                      )}
+                    </div>
                     <div className="flex items-center justify-between pt-2 border-t">
                       <span className="text-xs text-gray-500">{et._count?.bookings || 0} réservation(s)</span>
                       <div className="flex gap-1">
@@ -241,6 +265,62 @@ export default function AppointmentTypesPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div>
+                  <Label>Type de RDV *</Label>
+                  <div className="grid grid-cols-2 gap-3 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => setForm(f => ({...f, typeRDV: 'individuel', maxParticipants: ''}))}
+                      className={`flex items-center justify-center gap-2 p-3 rounded-lg border-2 transition-all text-sm font-medium ${
+                        form.typeRDV === 'individuel'
+                          ? 'border-blue-500 bg-blue-50 text-blue-700'
+                          : 'border-gray-200 hover:border-gray-300 text-gray-600'
+                      }`}
+                    >
+                      <User className="w-4 h-4" /> Individuel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm(f => ({...f, typeRDV: 'collectif'}))}
+                      className={`flex items-center justify-center gap-2 p-3 rounded-lg border-2 transition-all text-sm font-medium ${
+                        form.typeRDV === 'collectif'
+                          ? 'border-purple-500 bg-purple-50 text-purple-700'
+                          : 'border-gray-200 hover:border-gray-300 text-gray-600'
+                      }`}
+                    >
+                      <Users className="w-4 h-4" /> Collectif
+                    </button>
+                  </div>
+                  {!form.typeRDV && <p className="text-xs text-red-500 mt-1">Obligatoire</p>}
+                </div>
+                {form.typeRDV === 'collectif' && (
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="maxP">Nombre max de participants *</Label>
+                      <Input
+                        id="maxP"
+                        type="number"
+                        min="2"
+                        max="100"
+                        value={form.maxParticipants}
+                        onChange={e => setForm(f => ({...f, maxParticipants: e.target.value}))}
+                        placeholder="Ex: 10"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="heureFixe">Heure fixe de la séance <span className="text-gray-400 font-normal">(optionnel)</span></Label>
+                      <Input
+                        id="heureFixe"
+                        type="time"
+                        value={form.heureFixe}
+                        onChange={e => setForm(f => ({...f, heureFixe: e.target.value}))}
+                        placeholder="Ex: 19:00"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Si remplie, le client ne choisira pas l&apos;heure — elle sera imposée.</p>
+                    </div>
+                  </div>
+                )}
                 <div className="flex gap-3 pt-2">
                   <Button type="submit" disabled={saving} className="flex-1">
                     {saving ? "Création..." : "Créer"}

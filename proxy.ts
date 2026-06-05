@@ -14,7 +14,6 @@ export default withAuth(
 export const config = {
   matcher: [
     "/dashboard/:path*",
-    "/api/booking/:path*",
     "/api/event-types/:path*",
     "/api/availability/:path*",
   ],

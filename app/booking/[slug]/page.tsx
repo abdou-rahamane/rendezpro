@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
-import { Calendar as CalendarIcon, Clock, MapPin, Video, CheckCircle, Euro, Loader2 } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, MapPin, Video, CheckCircle, Euro, Loader2, Users, User } from "lucide-react";
 import { format, addDays, isBefore, startOfDay } from "date-fns";
 import { fr } from "date-fns/locale";
 import { toast } from "sonner";
@@ -28,6 +28,8 @@ function generateTimeSlots(startTime: string, endTime: string, duration: number)
 }
 
 export default function BookingPage({ params }: { params: { slug: string } }) {
+  alert('BookingPage chargé avec slug: ' + params.slug)
+  console.log('=== BOOKINGFLOW CHARGÉ ===')
   const [eventType, setEventType] = useState<any>(null);
   const [availabilities, setAvailabilities] = useState<any[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
@@ -36,6 +38,21 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
   const [selectedDate, setSelectedDate] = useState<Date>();
   const [selectedTime, setSelectedTime] = useState<string>();
   const [step, setStep] = useState(1);
+
+  const isHeureFixe = useMemo(() => {
+  if (!eventType) return false
+  return eventType.typeRDV === 'collectif' && 
+         eventType.heureFixe !== null && 
+         eventType.heureFixe !== undefined &&
+         eventType.heureFixe !== ''
+}, [eventType])
+
+  useEffect(() => {
+    if (isHeureFixe && eventType?.heureFixe) {
+      setSelectedTime(eventType.heureFixe)
+    }
+  }, [isHeureFixe, eventType])
+
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({ name: "", email: "", phone: "", message: "" });
 
@@ -47,6 +64,7 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
       })
       .then(data => {
         if (data) {
+          console.log('=== EVENTTYPE DATA ===', data.eventType)
           setEventType(data.eventType);
           setAvailabilities(data.availabilities);
         }
@@ -54,6 +72,13 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
       .catch(() => setNotFound(true))
       .finally(() => setPageLoading(false));
   }, [params.slug]);
+
+  // Auto-set selectedTime for fixed hour appointments
+  useEffect(() => {
+    if (isHeureFixe && eventType?.heureFixe) {
+      setSelectedTime(eventType.heureFixe)
+    }
+  }, [isHeureFixe, eventType])
 
   // Calculer les créneaux disponibles pour la date sélectionnée
   const getAvailableSlots = (date: Date): string[] => {
@@ -69,7 +94,17 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
     if (isBefore(date, startOfDay(new Date()))) return true;
     const dayOfWeek = date.getDay();
     const availability = availabilities.find(a => a.jour === dayOfWeek.toString());
-    return !availability || !availability.actif;
+    if (!availability || !availability.actif) return true;
+
+    // Si RDV collectif avec heure fixe, vérifier que l'heure fixe est dans la plage d'ouverture
+    if (isHeureFixe && eventType.heureFixe) {
+      const [h] = eventType.heureFixe.split(":").map(Number);
+      const [startH] = availability.heureDebut.split(":").map(Number);
+      const [endH] = availability.heureFin.split(":").map(Number);
+      if (h < startH || h >= endH) return true;
+    }
+
+    return false;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -98,7 +133,8 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
       if (res.ok) {
         setStep(3);
       } else {
-        toast.error("Erreur lors de la réservation");
+        const data = await res.json().catch(() => ({}))
+        toast.error(data.error || "Erreur lors de la réservation");
       }
     } catch {
       toast.error("Erreur réseau");
@@ -145,6 +181,7 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
             <p className="text-gray-600 mb-6">Votre réservation avec {profName} a bien été enregistrée.</p>
             <div className="bg-gray-50 rounded-lg p-4 text-left space-y-2">
               <p className="text-sm"><strong>Type :</strong> {eventType.titre}</p>
+              {eventType.description && <p className="text-sm"><strong>Description :</strong> {eventType.description}</p>}
               <p className="text-sm"><strong>Date :</strong> {selectedDate && format(selectedDate, "dd MMMM yyyy", { locale: fr })}</p>
               <p className="text-sm"><strong>Heure :</strong> {selectedTime}</p>
               <p className="text-sm"><strong>Durée :</strong> {eventType.duree} min</p>
@@ -158,7 +195,7 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+    <div key={eventType?.id || 'loading'} className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Header */}
       <div className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center space-x-2">
@@ -187,6 +224,11 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
                   {eventType.lieu}
                 </span>
                 {eventType.prix > 0 && <span className="flex items-center gap-1"><Euro className="w-4 h-4" />{eventType.prix}€</span>}
+                <Badge variant="outline" className={eventType.typeRDV === 'collectif' ? 'border-purple-300 text-purple-700 bg-purple-50 w-fit' : 'border-blue-300 text-blue-700 bg-blue-50 w-fit'}>
+                  {eventType.typeRDV === 'collectif'
+                    ? <><Users className="w-3 h-3 mr-1" />Collectif (max {eventType.maxParticipants} pers.)</>
+                    : <><User className="w-3 h-3 mr-1" />Individuel</>}
+                </Badge>
               </div>
             </div>
           </CardContent>
@@ -204,7 +246,16 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
               <Calendar
                 mode="single"
                 selected={selectedDate}
-                onSelect={date => { setSelectedDate(date); setSelectedTime(undefined); setStep(1); }}
+                onSelect={date => {
+                  setSelectedDate(date);
+                  if (isHeureFixe) {
+                    setSelectedTime(eventType.heureFixe);
+                    setStep(2);
+                  } else {
+                    setSelectedTime(undefined);
+                    setStep(1);
+                  }
+                }}
                 disabled={isDateDisabled}
                 className="rounded-md border w-full"
                 locale={fr}
@@ -221,34 +272,71 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
             <CardContent>
               {step === 1 ? (
                 <div>
-                  {!selectedDate ? (
-                    <p className="text-center text-gray-500 py-8">Sélectionnez une date pour voir les créneaux disponibles</p>
-                  ) : availableSlots.length === 0 ? (
-                    <p className="text-center text-gray-500 py-8">Aucun créneau disponible ce jour</p>
-                  ) : (
-                    <>
-                      <p className="text-sm text-gray-600 mb-4">
-                        {format(selectedDate, "EEEE d MMMM yyyy", { locale: fr })}
-                      </p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {availableSlots.map(time => (
-                          <Button
-                            key={time}
-                            variant={selectedTime === time ? "default" : "outline"}
-                            className="py-2"
-                            onClick={() => { setSelectedTime(time); setStep(2); }}
-                          >
-                            {time}
-                          </Button>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                  {isHeureFixe ? (
+  <div style={{ marginTop: '16px' }}>
+    <p style={{ 
+      fontSize: '14px', 
+      color: '#534AB7', 
+      fontWeight: 500, 
+      marginBottom: '12px' 
+    }}>
+      Heure fixée par le professionnel
+    </p>
+    <div style={{ 
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '8px',
+      background: '#534AB7',
+      color: 'white',
+      padding: '10px 20px',
+      borderRadius: '8px',
+      fontSize: '16px',
+      fontWeight: 500,
+    }}>
+      <span>🔒</span>
+      <span>{eventType.heureFixe}</span>
+    </div>
+    <p style={{ 
+      fontSize: '12px', 
+      color: '#888', 
+      marginTop: '8px' 
+    }}>
+      L'heure est fixée — vous pouvez uniquement choisir la date
+    </p>
+  </div>
+) : (
+  <div className="grid grid-cols-3 gap-2 mt-4">
+    {availableSlots.map((slot: string) => (
+      <button
+        key={slot}
+        onClick={() => setSelectedTime(slot)}
+        style={{
+          padding: '8px',
+          borderRadius: '8px',
+          border: selectedTime === slot 
+            ? 'none' 
+            : '1px solid #e5e7eb',
+          background: selectedTime === slot 
+            ? '#534AB7' 
+            : 'white',
+          color: selectedTime === slot 
+            ? 'white' 
+            : '#333',
+          cursor: 'pointer',
+          fontSize: '13px'
+        }}
+      >
+        {slot}
+      </button>
+    ))}
+  </div>
+)}
                 </div>
               ) : (
                 <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800">
+                  <div className={`rounded-lg p-3 text-sm ${isHeureFixe ? 'bg-purple-50 text-purple-800' : 'bg-blue-50 text-blue-800'}`}>
                     <strong>{selectedDate && format(selectedDate, "dd/MM/yyyy", { locale: fr })}</strong> à <strong>{selectedTime}</strong>
+                    {isHeureFixe && <span className="ml-2 text-xs font-normal opacity-75">(heure fixée par le professionnel)</span>}
                   </div>
                   <div>
                     <Label htmlFor="name">Nom complet *</Label>

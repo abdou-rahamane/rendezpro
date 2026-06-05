@@ -10,10 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import {
   Calendar, Clock, Users, TrendingUp, TrendingDown,
   Menu, Home, CalendarDays, UserCheck, FileText,
-  Settings, BarChart3, Link2, ArrowUpRight, ExternalLink, ChevronDown, Copy, Check
+  Settings, BarChart3, Link2, ArrowUpRight, ExternalLink, ChevronDown, Copy, Check, User
 } from "lucide-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
+import AIAssistant from "@/components/ai-assistant";
 
 const navigationItems = [
   { name: "Tableau de bord", icon: Home, href: "/dashboard", active: true },
@@ -23,7 +24,7 @@ const navigationItems = [
   { name: "Disponibilités", icon: Clock, href: "/dashboard/availability" },
   { name: "Analytics", icon: BarChart3, href: "/dashboard/analytics" },
   { name: "Intégrations", icon: Link2, href: "/dashboard/integrations" },
-  { name: "Paramètres", icon: Settings, href: "/dashboard/settings" },
+  { name: "Profil", icon: User, href: "/dashboard/profile" },
 ];
 
 function getStatBg(color: string) {
@@ -307,6 +308,7 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+      <AIAssistant />
     </div>
   );
 }

@@ -42,7 +42,7 @@ const navigationItems = [
   { name: "Disponibilités", icon: Clock, href: "/dashboard/availability" },
   { name: "Analytics", icon: BarChart3, href: "/dashboard/analytics" },
   { name: "Intégrations", icon: Link2, href: "/dashboard/integrations" },
-  { name: "Paramètres", icon: Settings, href: "/dashboard/settings" },
+  { name: "Profil", icon: Settings, href: "/dashboard/profile" },
 ];
 
 function getStatusBadge(status: string) {

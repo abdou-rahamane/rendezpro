@@ -14,18 +14,31 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { name, description, duration, price, location } = await request.json()
+    const { name, description, duration, price, location, typeRDV, maxParticipants, heureFixe } = await request.json()
 
-    const eventType = await prisma.eventType.create({
-      data: {
-        titre: name,
-        description: description || "",
-        duree: duration,
-        prix: price,
-        lieu: location,
-        userId: session.user.id,
-      }
-    })
+    if (!typeRDV || !['individuel', 'collectif'].includes(typeRDV)) {
+      return NextResponse.json({ error: "Le type de RDV est obligatoire (individuel ou collectif)" }, { status: 400 })
+    }
+    if (typeRDV === 'collectif' && (!maxParticipants || maxParticipants < 2)) {
+      return NextResponse.json({ error: "Un RDV collectif doit avoir au moins 2 participants maximum" }, { status: 400 })
+    }
+
+    const id = `cuid_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const now = new Date()
+
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "EventType" (id, titre, description, duree, prix, lieu, "typeRDV", "maxParticipants", "heureFixe", actif, "userId", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, $10, $11, $12)`,
+      id, name, description || "", duration, price, location,
+      typeRDV,
+      typeRDV === 'collectif' ? (maxParticipants || null) : null,
+      typeRDV === 'collectif' ? (heureFixe || null) : null,
+      session.user.id, now, now
+    )
+
+    const [eventType] = await prisma.$queryRawUnsafe(
+      `SELECT id, titre, description, duree, prix, lieu, "typeRDV", "maxParticipants", "heureFixe", actif FROM "EventType" WHERE id = $1`, id
+    ) as any[]
 
     return NextResponse.json({
       message: "Type de rendez-vous créé avec succès",
@@ -47,15 +60,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Non authentifié" }, { status: 401 })
     }
 
-    const eventTypes = await prisma.eventType.findMany({
-      where: { userId: session.user.id },
-      include: {
-        _count: { select: { bookings: true } }
-      },
-      orderBy: { createdAt: "asc" }
-    })
+    const eventTypes = await prisma.$queryRawUnsafe(
+      `SELECT et.id, et.titre, et.description, et.duree, et.prix, et.lieu, et."typeRDV", et."maxParticipants", et."heureFixe", et.actif, et."createdAt",
+        (SELECT COUNT(*) FROM "Booking" b WHERE b."eventTypeId" = et.id) AS "_bookingCount"
+       FROM "EventType" et
+       WHERE et."userId" = $1
+       ORDER BY et."createdAt" ASC`,
+      session.user.id
+    ) as any[]
 
-    return NextResponse.json(eventTypes)
+    const formatted = eventTypes.map(({ _bookingCount, ...et }) => ({
+      ...et,
+      duree: Number(et.duree),
+      prix: Number(et.prix),
+      maxParticipants: et.maxParticipants != null ? Number(et.maxParticipants) : null,
+      _count: { bookings: Number(_bookingCount) },
+    }))
+
+    return NextResponse.json(formatted)
   } catch (error) {
     console.error("Get event types error:", error)
     return NextResponse.json(

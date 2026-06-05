@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import {
+  sendBookingConfirmationToClient,
+  sendBookingNotificationToPro,
+} from "@/lib/email"
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,6 +16,54 @@ export async function POST(request: NextRequest) {
       eventTypeId,
       userId 
     } = await request.json()
+
+    // --- Règle métier : détection de conflit de créneau ---
+    const [eventTypeRow] = await prisma.$queryRawUnsafe(
+      `SELECT duree, "typeRDV", "maxParticipants" FROM "EventType" WHERE id = $1`,
+      eventTypeId
+    ) as any[]
+
+    if (!eventTypeRow) {
+      return NextResponse.json({ error: "Type de RDV introuvable" }, { status: 404 })
+    }
+
+    const bookingStart = new Date(date)
+    const bookingEnd = new Date(bookingStart.getTime() + eventTypeRow.duree * 60 * 1000)
+
+    // Chercher des bookings confirmés du même professionnel qui chevauchent le créneau
+    const conflicts = await prisma.$queryRawUnsafe(
+      `SELECT b.id, et."typeRDV", et."maxParticipants", et.id as "etId"
+       FROM "Booking" b
+       INNER JOIN "EventType" et ON b."eventTypeId" = et.id
+       WHERE b."userId" = $1
+         AND b.statut != 'cancelled'
+         AND b.date < $2
+         AND (b.date + (et.duree * INTERVAL '1 minute')) > $3`,
+      userId, bookingEnd.toISOString(), bookingStart.toISOString()
+    ) as any[]
+
+    if (eventTypeRow.typeRDV === 'individuel') {
+      if (conflicts.length > 0) {
+        return NextResponse.json(
+          { error: "Ce créneau est déjà réservé. Veuillez choisir un autre horaire." },
+          { status: 409 }
+        )
+      }
+    } else if (eventTypeRow.typeRDV === 'collectif') {
+      const sameSlotCount = await prisma.$queryRawUnsafe(
+        `SELECT COUNT(*) as count FROM "Booking"
+         WHERE "eventTypeId" = $1 AND statut != 'cancelled'`,
+        eventTypeId
+      ) as any[]
+      const current = Number(sameSlotCount[0]?.count || 0)
+      if (current >= (eventTypeRow.maxParticipants || 1)) {
+        return NextResponse.json(
+          { error: `Ce RDV collectif est complet (${eventTypeRow.maxParticipants} participants max).` },
+          { status: 409 }
+        )
+      }
+    }
+    // --- Fin règle métier ---
 
     // Create booking
     const booking = await prisma.booking.create({
@@ -29,6 +81,35 @@ export async function POST(request: NextRequest) {
         user: true,
       }
     })
+
+    const emailData = {
+      clientNom: booking.clientNom,
+      clientEmail: booking.clientEmail,
+      clientTel: booking.clientTel,
+      clientMsg: booking.clientMsg,
+      proNom: booking.user.nom,
+      proPrenom: booking.user.prenom,
+      eventTypeTitle: booking.eventType.titre,
+      date: booking.date,
+      bookingId: booking.id,
+    }
+
+    const [clientResult, proResult] = await Promise.allSettled([
+      sendBookingConfirmationToClient(emailData),
+      sendBookingNotificationToPro(emailData, booking.user.email),
+    ])
+
+    if (clientResult.status === "rejected") {
+      console.error("❌ Email client échoué:", clientResult.reason)
+    } else {
+      console.log("✅ Email client envoyé:", clientResult.value)
+    }
+
+    if (proResult.status === "rejected") {
+      console.error("❌ Email pro échoué:", proResult.reason)
+    } else {
+      console.log("✅ Email pro envoyé:", proResult.value)
+    }
 
     return NextResponse.json({
       message: "Rendez-vous créé avec succès",
