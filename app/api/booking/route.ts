@@ -37,8 +37,8 @@ export async function POST(request: NextRequest) {
        INNER JOIN "EventType" et ON b."eventTypeId" = et.id
        WHERE b."userId" = $1
          AND b.statut != 'cancelled'
-         AND b.date < $2
-         AND (b.date + (et.duree * INTERVAL '1 minute')) > $3`,
+         AND b.date < $2::timestamp
+         AND (b.date + (et.duree * INTERVAL '1 minute')) > $3::timestamp`,
       userId, bookingEnd.toISOString(), bookingStart.toISOString()
     ) as any[]
 

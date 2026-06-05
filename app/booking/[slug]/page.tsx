@@ -7,8 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
-import { Calendar as CalendarIcon, Clock, MapPin, Video, CheckCircle, Euro, Loader2, Users, User } from "lucide-react";
-import { format, addDays, isBefore, startOfDay } from "date-fns";
+import { Calendar as CalendarIcon, Clock, MapPin, Video, CheckCircle, Euro, Loader2, Users, User, Lock } from "lucide-react";
+import { format, isBefore, startOfDay } from "date-fns";
 import { fr } from "date-fns/locale";
 import { toast } from "sonner";
 
@@ -28,31 +28,14 @@ function generateTimeSlots(startTime: string, endTime: string, duration: number)
 }
 
 export default function BookingPage({ params }: { params: { slug: string } }) {
-  alert('BookingPage chargé avec slug: ' + params.slug)
-  console.log('=== BOOKINGFLOW CHARGÉ ===')
+  console.log('=== BOOKING PAGE LOADED ===');
   const [eventType, setEventType] = useState<any>(null);
   const [availabilities, setAvailabilities] = useState<any[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-
   const [selectedDate, setSelectedDate] = useState<Date>();
   const [selectedTime, setSelectedTime] = useState<string>();
   const [step, setStep] = useState(1);
-
-  const isHeureFixe = useMemo(() => {
-  if (!eventType) return false
-  return eventType.typeRDV === 'collectif' && 
-         eventType.heureFixe !== null && 
-         eventType.heureFixe !== undefined &&
-         eventType.heureFixe !== ''
-}, [eventType])
-
-  useEffect(() => {
-    if (isHeureFixe && eventType?.heureFixe) {
-      setSelectedTime(eventType.heureFixe)
-    }
-  }, [isHeureFixe, eventType])
-
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({ name: "", email: "", phone: "", message: "" });
 
@@ -64,7 +47,6 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
       })
       .then(data => {
         if (data) {
-          console.log('=== EVENTTYPE DATA ===', data.eventType)
           setEventType(data.eventType);
           setAvailabilities(data.availabilities);
         }
@@ -73,38 +55,61 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
       .finally(() => setPageLoading(false));
   }, [params.slug]);
 
-  // Auto-set selectedTime for fixed hour appointments
-  useEffect(() => {
-    if (isHeureFixe && eventType?.heureFixe) {
-      setSelectedTime(eventType.heureFixe)
-    }
-  }, [isHeureFixe, eventType])
+  const isHeureFixe = useMemo(() => {
+    if (!eventType) return false;
+    const result = eventType.typeRDV === 'collectif' &&
+      eventType.heureFixe !== null &&
+      eventType.heureFixe !== undefined &&
+      eventType.heureFixe !== '';
+    console.log('=== DEBUG isHeureFixe ===');
+    console.log('eventType.typeRDV:', eventType.typeRDV);
+    console.log('eventType.heureFixe:', eventType.heureFixe);
+    console.log('result:', result);
+    return result;
+  }, [eventType]);
 
-  // Calculer les créneaux disponibles pour la date sélectionnée
-  const getAvailableSlots = (date: Date): string[] => {
-    if (!date || !eventType) return [];
-    const dayOfWeek = date.getDay(); // 0=Dimanche, 1=Lundi...
-    const availability = availabilities.find(a => a.jour === dayOfWeek.toString());
-    if (!availability || !availability.actif) return [];
-    return generateTimeSlots(availability.heureDebut, availability.heureFin, eventType.duree);
-  };
-
-  // Désactiver les jours sans disponibilité
   const isDateDisabled = (date: Date) => {
     if (isBefore(date, startOfDay(new Date()))) return true;
     const dayOfWeek = date.getDay();
     const availability = availabilities.find(a => a.jour === dayOfWeek.toString());
-    if (!availability || !availability.actif) return true;
-
-    // Si RDV collectif avec heure fixe, vérifier que l'heure fixe est dans la plage d'ouverture
-    if (isHeureFixe && eventType.heureFixe) {
-      const [h] = eventType.heureFixe.split(":").map(Number);
-      const [startH] = availability.heureDebut.split(":").map(Number);
-      const [endH] = availability.heureFin.split(":").map(Number);
-      if (h < startH || h >= endH) return true;
+    
+    // For fixed time collective appointments, just check if the day is available
+    if (isHeureFixe) {
+      return !availability || !availability.actif;
     }
-
+    
+    // For normal appointments, check time slots availability
+    if (!availability || !availability.actif) return true;
     return false;
+  };
+
+  const getSlotsForDate = (date: Date) => {
+  if (!date || !eventType) return []
+  
+  // Si RDV collectif avec heure fixe → retourner UNIQUEMENT l'heure fixe
+  if (eventType.typeRDV === 'collectif' && eventType.heureFixe) {
+    return [eventType.heureFixe]
+  }
+  
+  // Sinon → générer les créneaux normaux depuis les disponibilités
+  const dayOfWeek = date.getDay()
+  const availability = availabilities.find(
+    (a: any) => a.jour === dayOfWeek.toString() && a.actif
+  )
+  if (!availability) return []
+  return generateTimeSlots(
+    availability.heureDebut, 
+    availability.heureFin, 
+    eventType.duree
+  )
+}
+
+  const handleDateSelect = (date: Date | undefined) => {
+    setSelectedDate(date);
+    setSelectedTime(undefined);
+    if (date && isHeureFixe && eventType?.heureFixe) {
+      setSelectedTime(eventType.heureFixe);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -115,7 +120,6 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
       const [h, m] = selectedTime.split(":").map(Number);
       const bookingDate = new Date(selectedDate);
       bookingDate.setHours(h, m, 0, 0);
-
       const res = await fetch("/api/booking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -129,11 +133,10 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
           userId: eventType.userId,
         }),
       });
-
       if (res.ok) {
         setStep(3);
       } else {
-        const data = await res.json().catch(() => ({}))
+        const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Erreur lors de la réservation");
       }
     } catch {
@@ -145,7 +148,7 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
 
   if (pageLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
       </div>
     );
@@ -153,12 +156,12 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
 
   if (notFound || !eventType) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      <div className="min-h-screen flex items-center justify-center">
         <Card className="max-w-md w-full text-center">
           <CardContent className="p-8">
             <CalendarIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h2 className="text-xl font-bold text-gray-900 mb-2">Page introuvable</h2>
-            <p className="text-gray-600">Ce lien de réservation n'existe pas ou n'est plus actif.</p>
+            <h2 className="text-xl font-bold mb-2">Page introuvable</h2>
+            <p className="text-gray-600">Ce lien de réservation n'existe pas.</p>
           </CardContent>
         </Card>
       </div>
@@ -167,7 +170,6 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
 
   const profName = `${eventType.user?.prenom || ""} ${eventType.user?.nom || ""}`.trim();
   const profInitials = profName.split(" ").map((n: string) => n[0]).join("").toUpperCase() || "?";
-  const availableSlots = selectedDate ? getAvailableSlots(selectedDate) : [];
 
   if (step === 3) {
     return (
@@ -177,11 +179,10 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <CheckCircle className="w-8 h-8 text-green-600" />
             </div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Rendez-vous confirmé !</h2>
+            <h2 className="text-2xl font-bold mb-2">Rendez-vous confirmé !</h2>
             <p className="text-gray-600 mb-6">Votre réservation avec {profName} a bien été enregistrée.</p>
             <div className="bg-gray-50 rounded-lg p-4 text-left space-y-2">
               <p className="text-sm"><strong>Type :</strong> {eventType.titre}</p>
-              {eventType.description && <p className="text-sm"><strong>Description :</strong> {eventType.description}</p>}
               <p className="text-sm"><strong>Date :</strong> {selectedDate && format(selectedDate, "dd MMMM yyyy", { locale: fr })}</p>
               <p className="text-sm"><strong>Heure :</strong> {selectedTime}</p>
               <p className="text-sm"><strong>Durée :</strong> {eventType.duree} min</p>
@@ -195,8 +196,7 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
   }
 
   return (
-    <div key={eventType?.id || 'loading'} className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* Header */}
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <div className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center space-x-2">
           <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg"></div>
@@ -205,7 +205,6 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
       </div>
 
       <div className="max-w-5xl mx-auto px-6 py-8">
-        {/* Pro info */}
         <Card className="mb-8 border-0 shadow-lg">
           <CardContent className="p-6">
             <div className="flex items-center gap-4 flex-wrap">
@@ -235,7 +234,6 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
         </Card>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Calendar */}
           <Card className="border-0 shadow-lg">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -246,16 +244,7 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
               <Calendar
                 mode="single"
                 selected={selectedDate}
-                onSelect={date => {
-                  setSelectedDate(date);
-                  if (isHeureFixe) {
-                    setSelectedTime(eventType.heureFixe);
-                    setStep(2);
-                  } else {
-                    setSelectedTime(undefined);
-                    setStep(1);
-                  }
-                }}
+                onSelect={handleDateSelect}
                 disabled={isDateDisabled}
                 className="rounded-md border w-full"
                 locale={fr}
@@ -264,79 +253,89 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
             </CardContent>
           </Card>
 
-          {/* Slots or Form */}
           <Card className="border-0 shadow-lg">
             <CardHeader>
-              <CardTitle>{step === 1 ? "Choisissez un créneau" : "Vos informations"}</CardTitle>
+              <CardTitle>
+                {step === 2 ? "Vos informations" : isHeureFixe ? "Heure du rendez-vous" : "Choisissez un créneau"}
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              {step === 1 ? (
+              {step === 1 && (
                 <div>
-                  {isHeureFixe ? (
-  <div style={{ marginTop: '16px' }}>
-    <p style={{ 
-      fontSize: '14px', 
-      color: '#534AB7', 
-      fontWeight: 500, 
-      marginBottom: '12px' 
-    }}>
-      Heure fixée par le professionnel
-    </p>
-    <div style={{ 
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '8px',
-      background: '#534AB7',
-      color: 'white',
-      padding: '10px 20px',
-      borderRadius: '8px',
-      fontSize: '16px',
-      fontWeight: 500,
-    }}>
-      <span>🔒</span>
-      <span>{eventType.heureFixe}</span>
-    </div>
-    <p style={{ 
-      fontSize: '12px', 
-      color: '#888', 
-      marginTop: '8px' 
-    }}>
-      L'heure est fixée — vous pouvez uniquement choisir la date
-    </p>
-  </div>
-) : (
-  <div className="grid grid-cols-3 gap-2 mt-4">
-    {availableSlots.map((slot: string) => (
-      <button
-        key={slot}
-        onClick={() => setSelectedTime(slot)}
-        style={{
-          padding: '8px',
-          borderRadius: '8px',
-          border: selectedTime === slot 
-            ? 'none' 
-            : '1px solid #e5e7eb',
-          background: selectedTime === slot 
-            ? '#534AB7' 
-            : 'white',
-          color: selectedTime === slot 
-            ? 'white' 
-            : '#333',
-          cursor: 'pointer',
-          fontSize: '13px'
-        }}
-      >
-        {slot}
-      </button>
-    ))}
-  </div>
-)}
+                  {!selectedDate ? (
+                    <div className="flex flex-col items-center justify-center h-40 text-gray-400">
+                      <CalendarIcon className="w-10 h-10 mb-2" />
+                      <p className="text-sm">Sélectionnez une date</p>
+                    </div>
+                  ) : isHeureFixe ? (
+                    <div className="flex flex-col items-center gap-4 mt-4">
+                      <p className="text-sm text-gray-600 text-center">
+                        Ce rendez-vous collectif a une heure fixe
+                      </p>
+                      <div className="flex items-center gap-3 bg-purple-600 text-white px-6 py-4 rounded-xl text-xl font-bold">
+                        <Lock className="w-5 h-5" />
+                        <span>{eventType.heureFixe}</span>
+                      </div>
+                      <p className="text-xs text-gray-400 text-center">
+                        L'heure est fixée par le professionnel
+                      </p>
+                      <Button
+                        onClick={() => setStep(2)}
+                        className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 mt-2"
+                      >
+                        Continuer →
+                      </Button>
+                    </div>
+                  ) : (
+                    <div>
+                      {getSlotsForDate(selectedDate!).length === 0 ? (
+                        <p className="text-sm text-gray-500 text-center mt-4">
+                          Aucun créneau disponible pour cette date
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-3 gap-2 mt-2">
+                          {getSlotsForDate(selectedDate!).map((slot: string) => (
+                            <button
+                              key={slot}
+                              onClick={() => {
+                                setSelectedTime(slot)
+                                setStep(2)
+                              }}
+                              disabled={eventType.typeRDV === 'collectif' && Boolean(eventType.heureFixe)}
+                              style={{
+                                padding: '8px',
+                                borderRadius: '8px',
+                                border: 'none',
+                                background: '#534AB7',
+                                color: 'white',
+                                cursor: eventType.typeRDV === 'collectif' ? 'default' : 'pointer',
+                                fontSize: '13px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                justifyContent: 'center'
+                              }}
+                            >
+                              {eventType.typeRDV === 'collectif' && eventType.heureFixe && '🔒'} {slot}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ) : (
+              )}
+
+              {step === 2 && (
                 <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className={`rounded-lg p-3 text-sm ${isHeureFixe ? 'bg-purple-50 text-purple-800' : 'bg-blue-50 text-blue-800'}`}>
-                    <strong>{selectedDate && format(selectedDate, "dd/MM/yyyy", { locale: fr })}</strong> à <strong>{selectedTime}</strong>
-                    {isHeureFixe && <span className="ml-2 text-xs font-normal opacity-75">(heure fixée par le professionnel)</span>}
+                  <div className="rounded-lg p-3 text-sm bg-purple-50 text-purple-800 flex items-center gap-2">
+                    <CalendarIcon className="w-4 h-4 flex-shrink-0" />
+                    <span>
+                      <strong>{selectedDate && format(selectedDate, "dd/MM/yyyy", { locale: fr })}</strong>
+                      {" à "}
+                      <strong>{selectedTime}</strong>
+                      {isHeureFixe && <span className="ml-1 text-xs opacity-75">(heure fixe)</span>}
+                    </span>
                   </div>
                   <div>
                     <Label htmlFor="name">Nom complet *</Label>
