@@ -37,21 +37,31 @@ model User {
 }
 
 model EventType {
-  id              String    @id @default(cuid())
+  id              String           @id @default(cuid())
   titre           String
   description     String?
   duree           Int
-  prix            Float     @default(0)
-  lieu            String    @default("visio")
-  typeRDV         String    @default("individuel")
+  prix            Float            @default(0)
+  lieu            String           @default("visio")
+  typeRDV         String           @default("individuel")
   maxParticipants Int?
   heureFixe       String?
-  actif           Boolean   @default(true)
+  actif           Boolean          @default(true)
   userId          String
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   bookings        Booking[]
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slots           EventTypeSlot[]
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model EventTypeSlot {
+  id          String    @id @default(cuid())
+  eventTypeId String
+  dateDebut   DateTime
+  dateFin     DateTime
+  createdAt   DateTime  @default(now())
+  eventType   EventType @relation(fields: [eventTypeId], references: [id], onDelete: Cascade)
 }
 
 model Availability {

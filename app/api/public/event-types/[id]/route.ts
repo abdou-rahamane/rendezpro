@@ -40,23 +40,48 @@ export async function GET(
       user: { nom: row.nom, prenom: row.prenom, email: row.email, bio: row.bio },
     }
 
-    // Get availabilities
-    const availabilities = await prisma.availability.findMany({
-      where: { userId: eventType.userId, actif: true },
-      orderBy: { jour: "asc" }
-    })
+    // Get slots and bookings
+    const slots = await prisma.$queryRawUnsafe(
+      `SELECT id, "dateDebut", "dateFin" 
+       FROM "EventTypeSlot" 
+       WHERE "eventTypeId" = $1 
+         AND "dateDebut" >= NOW()
+       ORDER BY "dateDebut" ASC`,
+      params.id
+    ) as any[]
 
-    // Force the correct values for the volleyball appointment
-    if (eventType.titre && eventType.titre.toLowerCase().includes('volleyball')) {
-      eventType.typeRDV = 'collectif';
-      eventType.heureFixe = '16:00';
-      eventType.maxParticipants = 10;
+    const bookings = await prisma.$queryRawUnsafe(
+      `SELECT COUNT(*) as count
+       FROM "Booking" 
+       WHERE "eventTypeId" = $1 
+         AND statut != 'cancelled'`,
+      params.id
+    ) as any[]
+
+    // Vérifier si RDV collectif est complet
+    const isComplet = eventType.typeRDV === 'collectif' &&
+      eventType.maxParticipants !== null &&
+      bookings[0]?.count >= eventType.maxParticipants
+
+    if (isComplet) {
+      return NextResponse.json(
+        { error: 'Ce rendez-vous est complet' },
+        { status: 410 }
+      )
     }
     
     console.log('API FINAL eventType:', JSON.stringify(eventType))
     console.log('API FINAL typeRDV:', eventType.typeRDV)
     console.log('API FINAL heureFixe:', eventType.heureFixe)
-    return NextResponse.json({ eventType, availabilities })
+    return NextResponse.json({ 
+      eventType: {
+        ...eventType,
+        slotsDisponibles: slots,
+        placesRestantes: eventType.typeRDV === 'collectif' && eventType.maxParticipants
+          ? eventType.maxParticipants - (bookings[0]?.count || 0)
+          : null
+      }
+    })
   } catch (error) {
     console.error('Erreur API event-type:', error)
     return NextResponse.json(

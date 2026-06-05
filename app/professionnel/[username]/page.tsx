@@ -84,6 +84,12 @@ export default function ProfessionalPage() {
   const selectedEventTypeData = professional.eventTypes.find(e => e.id === selectedEventType)
 
   const generateTimeSlots = () => {
+    // Si RDV collectif avec heure fixe → retourner uniquement l'heure fixe
+    if (selectedEventTypeData?.typeRDV === 'collectif' && selectedEventTypeData?.heureFixe) {
+      return [selectedEventTypeData.heureFixe]
+    }
+    
+    // Sinon → générer les créneaux normaux
     const slots = []
     for (let hour = 9; hour <= 18; hour++) {
       for (let minute = 0; minute < 60; minute += 30) {
@@ -284,13 +290,14 @@ export default function ProfessionalPage() {
                       <button
                         key={time}
                         onClick={() => setSelectedTime(time)}
+                        disabled={selectedEventTypeData?.typeRDV === 'collectif' && Boolean(selectedEventTypeData?.heureFixe)}
                         className={`py-2 px-1 text-sm rounded-lg border-2 transition-all font-medium ${
                           selectedTime === time
                             ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
                             : 'bg-white text-gray-700 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50'
-                        }`}
+                        } ${selectedEventTypeData?.typeRDV === 'collectif' && selectedEventTypeData?.heureFixe ? 'cursor-not-allowed opacity-90' : ''}`}
                       >
-                        {time}
+                        {selectedEventTypeData?.typeRDV === 'collectif' && selectedEventTypeData?.heureFixe && '🔒'} {time}
                       </button>
                     ))}
                   </div>

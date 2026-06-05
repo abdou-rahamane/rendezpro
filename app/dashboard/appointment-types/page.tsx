@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import React from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -18,13 +19,29 @@ const navigationItems = [
   { name: "Calendrier", icon: CalendarDays, href: "/dashboard/calendar" },
   { name: "Rendez-vous", icon: UserCheck, href: "/dashboard/appointments" },
   { name: "Types de RDV", icon: FileText, href: "/dashboard/appointment-types", active: true },
-  { name: "Disponibilités", icon: Clock, href: "/dashboard/availability" },
-  { name: "Analytics", icon: BarChart3, href: "/dashboard/analytics" },
+    { name: "Analytics", icon: BarChart3, href: "/dashboard/analytics" },
   { name: "Intégrations", icon: Link2, href: "/dashboard/integrations" },
   { name: "Profil", icon: Settings, href: "/dashboard/profile" },
 ];
 
-const EMPTY_FORM = { name: "", description: "", duration: "30", price: "0", location: "Visioconférence", typeRDV: "", maxParticipants: "", heureFixe: "" };
+// Interface pour un créneau
+interface TimeSlot {
+  id?: string
+  dateDebut: string  // format "YYYY-MM-DD HH:mm"
+  dateFin: string    // format "YYYY-MM-DD HH:mm"
+}
+
+const EMPTY_FORM = { 
+  name: "", 
+  description: "", 
+  duration: "30", 
+  price: "0", 
+  location: "Visioconférence", 
+  typeRDV: "", 
+  maxParticipants: "", 
+  heureFixe: "",
+  slots: [] as TimeSlot[]
+};
 
 export default function AppointmentTypesPage() {
   const { data: session, status } = useSession();
@@ -35,6 +52,7 @@ export default function AppointmentTypesPage() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [conflicts, setConflicts] = useState<any[]>([]);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/auth/login");
@@ -44,6 +62,78 @@ export default function AppointmentTypesPage() {
     if (session) loadEventTypes();
   }, [session]);
 
+// Composant hybride pour le lieu avec option personnalisée - VERSION SIMPLE
+function LocationSelector({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [showCustomInput, setShowCustomInput] = useState(false)
+
+  const presetLocations = [
+    'Visioconférence',
+    'Téléphone', 
+    'Cabinet',
+    'Domicile'
+  ]
+
+  // Toujours montrer le champ si la valeur n'est pas dans les presets
+  const isCustomValue = value && !presetLocations.includes(value)
+
+  return (
+    <div className="space-y-3">
+      {/* TOUJOURS montrer le Select */}
+      <Select value={value || ''} onValueChange={(newValue) => {
+        onChange(newValue)
+        if (newValue === 'custom') {
+          setShowCustomInput(true)
+          onChange('')
+        } else {
+          setShowCustomInput(false)
+        }
+      }}>
+        <SelectTrigger>
+          <SelectValue placeholder="Choisissez un lieu..." />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="Visioconférence">📹 Visioconférence</SelectItem>
+          <SelectItem value="Téléphone">📞 Téléphone</SelectItem>
+          <SelectItem value="Cabinet">🏥 Cabinet</SelectItem>
+          <SelectItem value="Domicile">🏠 Domicile</SelectItem>
+          <SelectItem value="custom">✏️ Autre lieu (saisir manuellement)</SelectItem>
+        </SelectContent>
+      </Select>
+
+      {/* TOUJOURS montrer le champ personnalisé si nécessaire */}
+      {(showCustomInput || isCustomValue) && (
+        <div className="space-y-2 p-4 border-2 border-green-500 rounded-lg bg-green-50">
+          <p className="text-sm text-green-700 font-medium">🎯 Champ personnalisé ACTIF !</p>
+          <Input
+            value={value || ''}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="Ex: Café Le Central, 15 Rue de la Paix, Paris"
+            className="w-full border-2 border-green-300"
+          />
+          <div className="flex gap-2 flex-wrap">
+            {[
+              'Café', 'Restaurant', 'Parc', 'Bureau', 'Salle de réunion', 
+              'Centre commercial', 'Bibliothèque', 'Hotel', 'Co-working'
+            ].map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                onClick={() => onChange(suggestion)}
+                className="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 rounded transition-colors"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-green-600">
+            💡 Saisissez une adresse précise pour que vos clients puissent vous retrouver facilement
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
   const loadEventTypes = () => {
     fetch("/api/event-types")
       .then(r => r.ok ? r.json() : [])
@@ -52,9 +142,319 @@ export default function AppointmentTypesPage() {
       .finally(() => setLoading(false));
   };
 
+// Composant de gestion des créneaux AMÉLIORÉ
+function SlotsManager({ slots, onChange, duration }: { 
+  slots: TimeSlot[], 
+  onChange: (slots: TimeSlot[]) => void,
+  duration: number
+}) {
+  const [mode, setMode] = useState<'recurring' | 'specific' | 'calendar'>('recurring')
+  const [recurringPattern, setRecurringPattern] = useState({
+    days: [] as string[],
+    startTime: '09:00',
+    endTime: '18:00',
+    startDate: '',
+    endDate: ''
+  })
+
+  // Mode 1: Créneaux récurrents (le plus simple)
+  const generateRecurringSlots = () => {
+    const newSlots: TimeSlot[] = []
+    const start = new Date(recurringPattern.startDate)
+    const end = new Date(recurringPattern.endDate)
+    
+    for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
+      const dayName = date.toLocaleDateString('fr-FR', { weekday: 'long' })
+      if (recurringPattern.days.includes(dayName)) {
+        const slotDate = new Date(date)
+        const [startH, startM] = recurringPattern.startTime.split(':').map(Number)
+        const [endH, endM] = recurringPattern.endTime.split(':').map(Number)
+        
+        slotDate.setHours(startH, startM, 0, 0)
+        const endDate = new Date(slotDate)
+        endDate.setHours(endH, endM, 0, 0)
+        
+        newSlots.push({
+          dateDebut: slotDate.toISOString().slice(0, 16),
+          dateFin: endDate.toISOString().slice(0, 16)
+        })
+      }
+    }
+    
+    onChange([...slots, ...newSlots])
+  }
+
+  // Mode 2: Créneaux spécifiques rapides
+  const addQuickSlot = (date: string, time: string) => {
+    const slotDate = new Date(`${date}T${time}`)
+    const endDate = new Date(slotDate)
+    endDate.setMinutes(endDate.getMinutes() + duration)
+    
+    onChange([...slots, {
+      dateDebut: slotDate.toISOString().slice(0, 16),
+      dateFin: endDate.toISOString().slice(0, 16)
+    }])
+  }
+
+  return (
+    <div className="space-y-4">
+      <label className="text-sm font-medium">Disponibilités pour ce RDV</label>
+      
+      {/* Sélecteur de mode */}
+      <div className="flex gap-2 p-1 bg-gray-100 rounded-lg">
+        <button
+          type="button"
+          onClick={() => setMode('recurring')}
+          className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+            mode === 'recurring' 
+              ? 'bg-white text-purple-700 shadow-sm' 
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          🔄 Réguliers
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('specific')}
+          className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+            mode === 'specific' 
+              ? 'bg-white text-purple-700 shadow-sm' 
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          📅 Spécifiques
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('calendar')}
+          className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+            mode === 'calendar' 
+              ? 'bg-white text-purple-700 shadow-sm' 
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          📆 Calendrier
+        </button>
+      </div>
+
+      {/* Mode 1: Créneaux récurrents */}
+      {mode === 'recurring' && (
+        <div className="p-4 bg-purple-50 rounded-lg space-y-3">
+          <h4 className="font-medium text-purple-900">🔄 Créneaux réguliers</h4>
+          
+          <div>
+            <label className="text-xs text-gray-600">Jours de la semaine</label>
+            <div className="grid grid-cols-7 gap-1 mt-1">
+              {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((day, i) => (
+                <button
+                  key={day}
+                  type="button"
+                  onClick={() => {
+                    const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
+                    const fullDay = days[i]
+                    setRecurringPattern(p => ({
+                      ...p,
+                      days: p.days.includes(fullDay) 
+                        ? p.days.filter(d => d !== fullDay)
+                        : [...p.days, fullDay]
+                    }))
+                  }}
+                  className={`px-2 py-1 text-xs rounded transition-colors ${
+                    recurringPattern.days.includes(['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'][i])
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-white text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  {day}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-600">De</label>
+              <input
+                type="time"
+                value={recurringPattern.startTime}
+                onChange={e => setRecurringPattern(p => ({ ...p, startTime: e.target.value }))}
+                className="w-full px-2 py-1 border rounded text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-600">À</label>
+              <input
+                type="time"
+                value={recurringPattern.endTime}
+                onChange={e => setRecurringPattern(p => ({ ...p, endTime: e.target.value }))}
+                className="w-full px-2 py-1 border rounded text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-600">Date de début</label>
+              <input
+                type="date"
+                value={recurringPattern.startDate}
+                onChange={e => setRecurringPattern(p => ({ ...p, startDate: e.target.value }))}
+                className="w-full px-2 py-1 border rounded text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-600">Date de fin</label>
+              <input
+                type="date"
+                value={recurringPattern.endDate}
+                onChange={e => setRecurringPattern(p => ({ ...p, endDate: e.target.value }))}
+                className="w-full px-2 py-1 border rounded text-sm"
+              />
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={generateRecurringSlots}
+            className="w-full bg-purple-600 text-white px-3 py-2 rounded-md text-sm hover:bg-purple-700 transition-colors"
+          >
+            ✨ Générer les créneaux
+          </button>
+        </div>
+      )}
+
+      {/* Mode 2: Créneaux spécifiques */}
+      {mode === 'specific' && (
+        <div className="p-4 bg-blue-50 rounded-lg space-y-3">
+          <h4 className="font-medium text-blue-900">📅 Ajouter des créneaux spécifiques</h4>
+          
+          <div className="grid grid-cols-3 gap-2">
+            <input
+              type="date"
+              id="specificDate"
+              className="px-2 py-1 border rounded text-sm"
+            />
+            <input
+              type="time"
+              id="specificTime"
+              className="px-2 py-1 border rounded text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const date = (document.getElementById('specificDate') as HTMLInputElement)?.value
+                const time = (document.getElementById('specificTime') as HTMLInputElement)?.value
+                if (date && time) addQuickSlot(date, time)
+              }}
+              className="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700"
+            >
+              + Ajouter
+            </button>
+          </div>
+
+          <div className="text-xs text-gray-600">
+            💡 Astuce : Ajoutez rapidement plusieurs créneaux pour des dates spéciales
+          </div>
+        </div>
+      )}
+
+      {/* Mode 3: Vue calendrier */}
+      {mode === 'calendar' && (
+        <div className="p-4 bg-green-50 rounded-lg">
+          <h4 className="font-medium text-green-900 mb-3">📆 Vue calendrier</h4>
+          <div className="text-center text-gray-500 py-8">
+            <p className="text-sm">🚀 Vue calendrier interactive</p>
+            <p className="text-xs mt-1">(Cliquez sur les dates pour ajouter des créneaux)</p>
+          </div>
+        </div>
+      )}
+
+      {/* Affichage des conflits */}
+      {conflicts.length > 0 && (
+        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <h4 className="text-sm font-medium text-red-800 mb-2">
+            ⚠️ {conflicts.length} conflit{conflicts.length > 1 ? 's' : ''} détecté{conflicts.length > 1 ? 's' : ''}
+          </h4>
+          <div className="space-y-2 max-h-32 overflow-y-auto">
+            {conflicts.map((conflict, i) => (
+              <div key={i} className="text-xs text-red-700">
+                <p className="font-medium">{conflict.message}</p>
+                <p className="text-gray-600">
+                  {new Date(conflict.slot.dateDebut).toLocaleDateString('fr-FR')} {new Date(conflict.slot.dateDebut).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-red-600 mt-2">
+            💡 Veuillez modifier les créneaux pour résoudre ces conflits
+          </p>
+        </div>
+      )}
+
+      {/* Liste des créneaux existants */}
+      {slots.length > 0 && (
+        <div className="mt-4">
+          <h4 className="text-sm font-medium text-gray-700 mb-2">
+            📋 {slots.length} créneau{slots.length > 1 ? 'x' : ''} configuré{slots.length > 1 ? 's' : ''}
+            {conflicts.length > 0 && <span className="text-red-500 ml-1">({conflicts.length} conflit{conflicts.length > 1 ? 's' : ''})</span>}
+          </h4>
+          <div className="max-h-32 overflow-y-auto space-y-1">
+            {slots.map((slot, index) => {
+              const hasConflict = conflicts.some(c => 
+                new Date(c.slot.dateDebut).getTime() === new Date(slot.dateDebut).getTime()
+              );
+              return (
+                <div key={index} className={`flex items-center justify-between p-2 rounded text-sm ${
+                  hasConflict ? 'bg-red-50 border border-red-200' : 'bg-gray-50'
+                }`}>
+                  <span className={hasConflict ? 'text-red-700' : 'text-gray-700'}>
+                    {new Date(slot.dateDebut).toLocaleDateString('fr-FR')} - {new Date(slot.dateDebut).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                    {hasConflict && ' ⚠️'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onChange(slots.filter((_, i) => i !== index))}
+                    className="text-red-500 hover:text-red-700 text-xs"
+                  >
+                    Supprimer
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+  // Vérification des conflits en temps réel
+  const checkConflicts = async (slots: TimeSlot[]) => {
+    if (!session?.user?.id || slots.length === 0) return;
+    
+    try {
+      const res = await fetch('/api/check-conflicts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slots })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setConflicts(data.conflicts || []);
+      }
+    } catch (error) {
+      console.error('Erreur vérification conflits:', error);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return;
+    if (conflicts.length > 0) {
+      toast.error("Veuillez résoudre les conflits avant de créer ce RDV");
+      return;
+    }
     setSaving(true);
     try {
       if (!form.typeRDV) {
@@ -67,6 +467,28 @@ export default function AppointmentTypesPage() {
         setSaving(false);
         return;
       }
+      
+      // Vérifier si un RDV avec la même disponibilité existe déjà
+      const hasConflict = eventTypes.some(existing => {
+        // Pour les RDV collectifs avec heure fixe
+        if (existing.typeRDV === 'collectif' && existing.heureFixe) {
+          return form.typeRDV === 'collectif' && form.heureFixe === existing.heureFixe;
+        }
+        // Pour les RDV individuels (même durée et même prix = même disponibilité)
+        if (existing.typeRDV === 'individuel') {
+          return form.typeRDV === 'individuel' && 
+                 parseInt(form.duration) === existing.duree && 
+                 parseFloat(form.price) === existing.prix;
+        }
+        return false;
+      });
+      
+      if (hasConflict) {
+        toast.error("Un RDV avec cette disponibilité existe déjà. Vous ne pouvez pas créer plusieurs RDV avec le même créneau.");
+        setSaving(false);
+        return;
+      }
+      
       const res = await fetch("/api/event-types", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -79,6 +501,7 @@ export default function AppointmentTypesPage() {
           typeRDV: form.typeRDV,
           maxParticipants: form.typeRDV === 'collectif' ? parseInt(form.maxParticipants) : undefined,
           heureFixe: form.typeRDV === 'collectif' && form.heureFixe ? form.heureFixe : undefined,
+          slots: form.slots.filter(slot => slot.dateDebut && slot.dateFin)
         }),
       });
       if (res.ok) {
@@ -255,15 +678,10 @@ export default function AppointmentTypesPage() {
                 </div>
                 <div>
                   <Label>Lieu</Label>
-                  <Select value={form.location} onValueChange={v => setForm(f => ({...f, location: v}))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Visioconférence">Visioconférence</SelectItem>
-                      <SelectItem value="Téléphone">Téléphone</SelectItem>
-                      <SelectItem value="Cabinet">Cabinet</SelectItem>
-                      <SelectItem value="Domicile">Domicile</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <LocationSelector 
+                    value={form.location}
+                    onChange={(location) => setForm(f => ({...f, location}))}
+                  />
                 </div>
                 <div>
                   <Label>Type de RDV *</Label>
@@ -321,6 +739,16 @@ export default function AppointmentTypesPage() {
                     </div>
                   </div>
                 )}
+                
+                {/* Section Disponibilités */}
+                <div className="border-t pt-4">
+                  <SlotsManager 
+                    slots={form.slots} 
+                    onChange={(slots) => setForm(f => ({...f, slots}))}
+                    duration={parseInt(form.duration)}
+                  />
+                </div>
+                
                 <div className="flex gap-3 pt-2">
                   <Button type="submit" disabled={saving} className="flex-1">
                     {saving ? "Création..." : "Créer"}
