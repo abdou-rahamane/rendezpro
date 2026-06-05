@@ -19,8 +19,6 @@ const navigationItems = [
   { name: "Calendrier", icon: CalendarDays, href: "/dashboard/calendar" },
   { name: "Rendez-vous", icon: UserCheck, href: "/dashboard/appointments" },
   { name: "Types de RDV", icon: FileText, href: "/dashboard/appointment-types", active: true },
-    { name: "Analytics", icon: BarChart3, href: "/dashboard/analytics" },
-  { name: "Intégrations", icon: Link2, href: "/dashboard/integrations" },
   { name: "Profil", icon: Settings, href: "/dashboard/profile" },
 ];
 
@@ -52,8 +50,8 @@ export default function AppointmentTypesPage() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [conflicts, setConflicts] = useState<any[]>([]);
-
+  const [slots, setSlots] = useState<TimeSlot[]>([]);
+  
   useEffect(() => {
     if (status === "unauthenticated") router.push("/auth/login");
   }, [status, router]);
@@ -137,7 +135,9 @@ function LocationSelector({ value, onChange }: { value: string; onChange: (value
   const loadEventTypes = () => {
     fetch("/api/event-types")
       .then(r => r.ok ? r.json() : [])
-      .then(setEventTypes)
+      .then(data => {
+                setEventTypes(data)
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   };
@@ -148,11 +148,11 @@ function SlotsManager({ slots, onChange, duration }: {
   onChange: (slots: TimeSlot[]) => void,
   duration: number
 }) {
-  const [mode, setMode] = useState<'recurring' | 'specific' | 'calendar'>('recurring')
+  const [mode, setMode] = useState<'recurring' | 'specific' | 'calendar'>('specific')
   const [recurringPattern, setRecurringPattern] = useState({
     days: [] as string[],
-    startTime: '09:00',
-    endTime: '18:00',
+    startTime: '',
+    endTime: '',
     startDate: '',
     endDate: ''
   })
@@ -181,6 +181,7 @@ function SlotsManager({ slots, onChange, duration }: {
       }
     }
     
+    // Ajouter les nouveaux créneaux SANS changer de mode
     onChange([...slots, ...newSlots])
   }
 
@@ -249,6 +250,8 @@ function SlotsManager({ slots, onChange, duration }: {
                 <button
                   key={day}
                   type="button"
+                  data-recurring-day={recurringPattern.days.includes(['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'][i])}
+                  data-day={['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'][i]}
                   onClick={() => {
                     const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
                     const fullDay = days[i]
@@ -275,6 +278,7 @@ function SlotsManager({ slots, onChange, duration }: {
             <div>
               <label className="text-xs text-gray-600">De</label>
               <input
+                id="recurringStartTime"
                 type="time"
                 value={recurringPattern.startTime}
                 onChange={e => setRecurringPattern(p => ({ ...p, startTime: e.target.value }))}
@@ -284,6 +288,7 @@ function SlotsManager({ slots, onChange, duration }: {
             <div>
               <label className="text-xs text-gray-600">À</label>
               <input
+                id="recurringEndTime"
                 type="time"
                 value={recurringPattern.endTime}
                 onChange={e => setRecurringPattern(p => ({ ...p, endTime: e.target.value }))}
@@ -296,6 +301,7 @@ function SlotsManager({ slots, onChange, duration }: {
             <div>
               <label className="text-xs text-gray-600">Date de début</label>
               <input
+                id="recurringStartDate"
                 type="date"
                 value={recurringPattern.startDate}
                 onChange={e => setRecurringPattern(p => ({ ...p, startDate: e.target.value }))}
@@ -305,6 +311,7 @@ function SlotsManager({ slots, onChange, duration }: {
             <div>
               <label className="text-xs text-gray-600">Date de fin</label>
               <input
+                id="recurringEndDate"
                 type="date"
                 value={recurringPattern.endDate}
                 onChange={e => setRecurringPattern(p => ({ ...p, endDate: e.target.value }))}
@@ -312,13 +319,58 @@ function SlotsManager({ slots, onChange, duration }: {
               />
             </div>
           </div>
-
+          
+          {/* Bouton pour générer les créneaux - COMME LE MODE SPÉCIFIQUE */}
           <button
             type="button"
-            onClick={generateRecurringSlots}
-            className="w-full bg-purple-600 text-white px-3 py-2 rounded-md text-sm hover:bg-purple-700 transition-colors"
+            onClick={() => {
+              // Validation
+              if (!recurringPattern.startDate || !recurringPattern.endDate || !recurringPattern.startTime || !recurringPattern.endTime || recurringPattern.days.length === 0) {
+                alert("Veuillez remplir tous les champs et sélectionner au moins un jour")
+                return
+              }
+              
+              const newSlots: TimeSlot[] = []
+              const start = new Date(recurringPattern.startDate)
+              const end = new Date(recurringPattern.endDate)
+              
+              for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
+                const dayName = date.toLocaleDateString('fr-FR', { weekday: 'long' })
+                if (recurringPattern.days.includes(dayName)) {
+                  const slotDate = new Date(date)
+                  const [startH, startM] = recurringPattern.startTime.split(':').map(Number)
+                  const [endH, endM] = recurringPattern.endTime.split(':').map(Number)
+                  
+                  slotDate.setHours(startH, startM, 0, 0)
+                  const endDate = new Date(slotDate)
+                  endDate.setHours(endH, endM, 0, 0)
+                  
+                  newSlots.push({
+                    dateDebut: slotDate.toISOString().slice(0, 16),
+                    dateFin: endDate.toISOString().slice(0, 16)
+                  })
+                }
+              }
+              
+              // Ajouter les créneaux et vider les champs (comme le mode spécifique)
+              onChange([...slots, ...newSlots])
+              
+              // Debug pour vérifier que les créneaux sont bien ajoutés
+              console.log("Créneaux réguliers ajoutés:", newSlots)
+              console.log("Total des créneaux:", [...slots, ...newSlots])
+              
+              // Vider les champs du mode régulier après ajout
+              setRecurringPattern({
+                days: [],
+                startTime: '',
+                endTime: '',
+                startDate: '',
+                endDate: ''
+              })
+            }}
+            className="w-full bg-purple-600 text-white px-2 py-1 rounded text-sm hover:bg-purple-700 transition-colors"
           >
-            ✨ Générer les créneaux
+            + Ajouter
           </button>
         </div>
       )}
@@ -333,6 +385,7 @@ function SlotsManager({ slots, onChange, duration }: {
               type="date"
               id="specificDate"
               className="px-2 py-1 border rounded text-sm"
+              min={new Date().toISOString().split('T')[0]}
             />
             <input
               type="time"
@@ -344,9 +397,22 @@ function SlotsManager({ slots, onChange, duration }: {
               onClick={() => {
                 const date = (document.getElementById('specificDate') as HTMLInputElement)?.value
                 const time = (document.getElementById('specificTime') as HTMLInputElement)?.value
-                if (date && time) addQuickSlot(date, time)
+                if (date && time) {
+                  const slotDate = new Date(`${date}T${time}`)
+                  const endDate = new Date(slotDate)
+                  endDate.setMinutes(endDate.getMinutes() + duration)
+                  
+                  onChange([...slots, {
+                    dateDebut: slotDate.toISOString().slice(0, 16),
+                    dateFin: endDate.toISOString().slice(0, 16)
+                  }])
+                  
+                  // Vider les champs après ajout
+                  (document.getElementById('specificDate') as HTMLInputElement).value = ''
+                  (document.getElementById('specificTime') as HTMLInputElement).value = ''
+                }
               }}
-              className="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700"
+              className="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700 transition-colors"
             >
               + Ajouter
             </button>
@@ -369,47 +435,25 @@ function SlotsManager({ slots, onChange, duration }: {
         </div>
       )}
 
-      {/* Affichage des conflits */}
-      {conflicts.length > 0 && (
-        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-          <h4 className="text-sm font-medium text-red-800 mb-2">
-            ⚠️ {conflicts.length} conflit{conflicts.length > 1 ? 's' : ''} détecté{conflicts.length > 1 ? 's' : ''}
-          </h4>
-          <div className="space-y-2 max-h-32 overflow-y-auto">
-            {conflicts.map((conflict, i) => (
-              <div key={i} className="text-xs text-red-700">
-                <p className="font-medium">{conflict.message}</p>
-                <p className="text-gray-600">
-                  {new Date(conflict.slot.dateDebut).toLocaleDateString('fr-FR')} {new Date(conflict.slot.dateDebut).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                </p>
-              </div>
-            ))}
+      
+      {/* Liste des créneaux existants - TOUJOURS VISIBLE */}
+      <div className="mt-4">
+        <h4 className="text-sm font-medium text-gray-700 mb-2">
+          📋 {slots.length} créneau{slots.length > 1 ? 'x' : ''} configuré{slots.length > 1 ? 's' : ''}
+        </h4>
+        {slots.length === 0 ? (
+          <div className="text-center py-4 border-2 border-dashed border-gray-300 rounded-lg">
+            <p className="text-sm text-gray-500">Aucun créneau ajouté</p>
+            <p className="text-xs text-gray-400 mt-1">Ajoutez des créneaux ci-dessus</p>
           </div>
-          <p className="text-xs text-red-600 mt-2">
-            💡 Veuillez modifier les créneaux pour résoudre ces conflits
-          </p>
-        </div>
-      )}
-
-      {/* Liste des créneaux existants */}
-      {slots.length > 0 && (
-        <div className="mt-4">
-          <h4 className="text-sm font-medium text-gray-700 mb-2">
-            📋 {slots.length} créneau{slots.length > 1 ? 'x' : ''} configuré{slots.length > 1 ? 's' : ''}
-            {conflicts.length > 0 && <span className="text-red-500 ml-1">({conflicts.length} conflit{conflicts.length > 1 ? 's' : ''})</span>}
-          </h4>
+        ) : (
           <div className="max-h-32 overflow-y-auto space-y-1">
             {slots.map((slot, index) => {
-              const hasConflict = conflicts.some(c => 
-                new Date(c.slot.dateDebut).getTime() === new Date(slot.dateDebut).getTime()
-              );
               return (
-                <div key={index} className={`flex items-center justify-between p-2 rounded text-sm ${
-                  hasConflict ? 'bg-red-50 border border-red-200' : 'bg-gray-50'
-                }`}>
-                  <span className={hasConflict ? 'text-red-700' : 'text-gray-700'}>
-                    {new Date(slot.dateDebut).toLocaleDateString('fr-FR')} - {new Date(slot.dateDebut).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                    {hasConflict && ' ⚠️'}
+                <div key={index} className="flex items-center justify-between p-2 rounded text-sm bg-green-50 border border-green-200">
+                  <span className="text-green-700 font-medium">
+                    📅 {new Date(slot.dateDebut).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'numeric', year: 'numeric' })} 
+                    {' '}{new Date(slot.dateDebut).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} - {new Date(slot.dateFin).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                   </span>
                   <button
                     type="button"
@@ -422,40 +466,17 @@ function SlotsManager({ slots, onChange, duration }: {
               );
             })}
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+          </div>
   )
 }
 
-  // Vérification des conflits en temps réel
-  const checkConflicts = async (slots: TimeSlot[]) => {
-    if (!session?.user?.id || slots.length === 0) return;
-    
-    try {
-      const res = await fetch('/api/check-conflicts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slots })
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
-        setConflicts(data.conflicts || []);
-      }
-    } catch (error) {
-      console.error('Erreur vérification conflits:', error);
-    }
-  };
-
+  
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return;
-    if (conflicts.length > 0) {
-      toast.error("Veuillez résoudre les conflits avant de créer ce RDV");
-      return;
-    }
-    setSaving(true);
+        setSaving(true);
     try {
       if (!form.typeRDV) {
         toast.error("Veuillez sélectionner le type de RDV (individuel ou collectif)");
@@ -468,49 +489,79 @@ function SlotsManager({ slots, onChange, duration }: {
         return;
       }
       
-      // Vérifier si un RDV avec la même disponibilité existe déjà
-      const hasConflict = eventTypes.some(existing => {
-        // Pour les RDV collectifs avec heure fixe
-        if (existing.typeRDV === 'collectif' && existing.heureFixe) {
-          return form.typeRDV === 'collectif' && form.heureFixe === existing.heureFixe;
-        }
-        // Pour les RDV individuels (même durée et même prix = même disponibilité)
-        if (existing.typeRDV === 'individuel') {
-          return form.typeRDV === 'individuel' && 
-                 parseInt(form.duration) === existing.duree && 
-                 parseFloat(form.price) === existing.prix;
-        }
-        return false;
-      });
+      // Vérifier si le mode réguliers est utilisé et générer les créneaux automatiquement
+      let finalSlots = [...slots];
       
-      if (hasConflict) {
-        toast.error("Un RDV avec cette disponibilité existe déjà. Vous ne pouvez pas créer plusieurs RDV avec le même créneau.");
-        setSaving(false);
-        return;
+      // Récupérer les valeurs du mode réguliers depuis le formulaire
+      const recurringDays = Array.from(document.querySelectorAll('button[data-recurring-day="true"]')).map(btn => btn.getAttribute('data-day'));
+      const startDate = (document.getElementById('recurringStartDate') as HTMLInputElement)?.value;
+      const endDate = (document.getElementById('recurringEndDate') as HTMLInputElement)?.value;
+      const startTime = (document.getElementById('recurringStartTime') as HTMLInputElement)?.value;
+      const endTime = (document.getElementById('recurringEndTime') as HTMLInputElement)?.value;
+      
+      // Si tous les champs réguliers sont remplis, générer les créneaux
+      if (recurringDays.length > 0 && startDate && endDate && startTime && endTime) {
+        const newSlots: TimeSlot[] = [];
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        
+        for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
+          const dayName = date.toLocaleDateString('fr-FR', { weekday: 'long' });
+          if (recurringDays.includes(dayName)) {
+            const slotDate = new Date(date);
+            const [startH, startM] = startTime.split(':').map(Number);
+            const [endH, endM] = endTime.split(':').map(Number);
+            
+            slotDate.setHours(startH, startM, 0, 0);
+            const endDateSlot = new Date(slotDate);
+            endDateSlot.setHours(endH, endM, 0, 0);
+            
+            newSlots.push({
+              dateDebut: slotDate.toISOString().slice(0, 16),
+              dateFin: endDateSlot.toISOString().slice(0, 16)
+            });
+          }
+        }
+        
+        finalSlots = [...finalSlots, ...newSlots];
+        
+        // Debug temporaire pour voir les créneaux générés
+        console.log("Créneaux générés automatiquement:", newSlots);
       }
       
+      const requestData = {
+        name: form.name,
+        description: form.description,
+        duration: parseInt(form.duration),
+        price: parseFloat(form.price) || 0,
+        location: form.location,
+        typeRDV: form.typeRDV,
+        maxParticipants: form.typeRDV === 'collectif' ? parseInt(form.maxParticipants) : undefined,
+        heureFixe: form.typeRDV === 'collectif' && form.heureFixe ? form.heureFixe : undefined,
+        slots: finalSlots.filter((slot: TimeSlot) => slot.dateDebut && slot.dateFin)
+      };
+      
+            
       const res = await fetch("/api/event-types", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: form.name,
-          description: form.description,
-          duration: parseInt(form.duration),
-          price: parseFloat(form.price) || 0,
-          location: form.location,
-          typeRDV: form.typeRDV,
-          maxParticipants: form.typeRDV === 'collectif' ? parseInt(form.maxParticipants) : undefined,
-          heureFixe: form.typeRDV === 'collectif' && form.heureFixe ? form.heureFixe : undefined,
-          slots: form.slots.filter(slot => slot.dateDebut && slot.dateFin)
-        }),
+        body: JSON.stringify(requestData),
       });
+      
+            
       if (res.ok) {
-        toast.success(`Type de RDV ${form.typeRDV} créé !`);
+        const data = await res.json();
+                toast.success(`Type de RDV ${form.typeRDV} créé !`);
         setForm(EMPTY_FORM);
+        setSlots([]);
         setShowForm(false);
-        loadEventTypes();
+        // Forcer le rechargement après un court délai pour laisser le temps à la BDD de se mettre à jour
+        setTimeout(() => {
+          loadEventTypes();
+        }, 500);
       } else {
-        toast.error("Erreur lors de la création");
+        const errorData = await res.json();
+                toast.error(`Erreur: ${errorData.error || 'Erreur lors de la création'}`);
       }
     } catch {
       toast.error("Erreur réseau");
@@ -618,6 +669,29 @@ function SlotsManager({ slots, onChange, duration }: {
                         </Badge>
                       )}
                     </div>
+                    {/* Section Créneaux */}
+                    <div className="mt-3 border-t pt-3">
+                      <p className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
+                        📅 Créneaux disponibles ({et.slots?.length || 0})
+                      </p>
+                      <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
+                          {et.slots && et.slots.length > 0 ? (
+                            et.slots.map((slot: any) => (
+                              <div key={slot.id} className="flex items-center justify-between text-xs bg-purple-50 text-purple-700 rounded px-2 py-1">
+                                <span className="font-medium">
+                                  {new Date(slot.dateDebut).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'numeric', year: 'numeric' })}
+                                </span>
+                                <span>
+                                  {new Date(slot.dateDebut).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} → {new Date(slot.dateFin).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-xs text-gray-400 italic">Aucun créneau configuré</p>
+                          )}
+                        </div>
+                    </div>
+                    
                     <div className="flex items-center justify-between pt-2 border-t">
                       <span className="text-xs text-gray-500">{et._count?.bookings || 0} réservation(s)</span>
                       <div className="flex gap-1">
@@ -743,17 +817,17 @@ function SlotsManager({ slots, onChange, duration }: {
                 {/* Section Disponibilités */}
                 <div className="border-t pt-4">
                   <SlotsManager 
-                    slots={form.slots} 
-                    onChange={(slots) => setForm(f => ({...f, slots}))}
+                    slots={slots} 
+                    onChange={setSlots}
                     duration={parseInt(form.duration)}
                   />
                 </div>
                 
                 <div className="flex gap-3 pt-2">
                   <Button type="submit" disabled={saving} className="flex-1">
-                    {saving ? "Création..." : "Créer"}
+                    {saving ? "Création..." : slots.length > 0 ? "Créer avec créneaux" : "Créer"}
                   </Button>
-                  <Button type="button" variant="outline" onClick={() => { setShowForm(false); setForm(EMPTY_FORM); }} className="flex-1">
+                  <Button type="button" variant="outline" onClick={() => { setShowForm(false); setForm(EMPTY_FORM); setSlots([]); }} className="flex-1">
                     Annuler
                   </Button>
                 </div>

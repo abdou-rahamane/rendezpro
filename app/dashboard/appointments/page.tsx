@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Search, Download, Calendar, Clock, User, Mail, Phone,
   Video, MapPin, CheckCircle, XCircle, AlertCircle,
-  Menu, Home, CalendarDays, UserCheck, FileText, BarChart3, Link2, Settings, Users
+  Menu, Home, CalendarDays, UserCheck, FileText, Settings, Users
 } from "lucide-react";
 
 const navigationItems = [
@@ -21,8 +21,6 @@ const navigationItems = [
   { name: "Calendrier", icon: CalendarDays, href: "/dashboard/calendar" },
   { name: "Rendez-vous", icon: UserCheck, href: "/dashboard/appointments", active: true },
   { name: "Types de RDV", icon: FileText, href: "/dashboard/appointment-types" },
-    { name: "Analytics", icon: BarChart3, href: "/dashboard/analytics" },
-  { name: "Intégrations", icon: Link2, href: "/dashboard/integrations" },
   { name: "Profil", icon: Settings, href: "/dashboard/profile" },
 ];
 

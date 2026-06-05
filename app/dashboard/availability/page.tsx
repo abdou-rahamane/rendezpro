@@ -18,8 +18,6 @@ const navigationItems = [
   { name: "Rendez-vous", icon: UserCheck, href: "/dashboard/appointments" },
   { name: "Types de RDV", icon: FileText, href: "/dashboard/appointment-types" },
   { name: "Disponibilités", icon: Clock, href: "/dashboard/availability", active: true },
-  { name: "Analytics", icon: BarChart3, href: "/dashboard/analytics" },
-  { name: "Intégrations", icon: Link2, href: "/dashboard/integrations" },
   { name: "Profil", icon: Settings, href: "/dashboard/profile" },
 ];
 

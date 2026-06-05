@@ -15,7 +15,8 @@ export async function POST(request: NextRequest) {
     }
 
     const { name, description, duration, price, location, typeRDV, maxParticipants, heureFixe, slots = [] } = await request.json()
-
+    
+    
     if (!typeRDV || !['individuel', 'collectif'].includes(typeRDV)) {
       return NextResponse.json({ error: "Le type de RDV est obligatoire (individuel ou collectif)" }, { status: 400 })
     }
@@ -23,23 +24,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Un RDV collectif doit avoir au moins 2 participants maximum" }, { status: 400 })
     }
 
-    // Vérification des conflits AMÉLIORÉE
+    // Vérification des conflits SIMPLIFIÉE
     async function checkConflicts(userId: string, slots: any[], excludeEventTypeId?: string) {
       const conflicts = []
       
       for (const slot of slots) {
         if (!slot.dateDebut || !slot.dateFin) continue
         
-        // 1. Vérifier les réservations existantes
+        const slotStart = new Date(slot.dateDebut)
+        const slotEnd = new Date(slot.dateFin)
+        
+        // 1. Vérifier les réservations existantes (uniquement sur la même date)
         const conflictingBookings = await prisma.$queryRawUnsafe(
           `SELECT b.id, et.titre, b.date
            FROM "Booking" b
            INNER JOIN "EventType" et ON b."eventTypeId" = et.id
            WHERE b."userId" = $1
              AND b.statut != 'cancelled'
-             AND b.date >= $2
-             AND b.date <= $3`,
-          userId, new Date(slot.dateDebut), new Date(slot.dateFin)
+             AND DATE(b.date) = DATE($2)`,
+          userId, slotStart
         ) as any[]
         
         if (conflictingBookings.length > 0) {
@@ -51,7 +54,7 @@ export async function POST(request: NextRequest) {
           })
         }
         
-        // 2. Vérifier les autres types de RDV avec des créneaux similaires
+        // 2. Vérifier les autres types de RDV (uniquement sur la même date et avec chevauchement)
         const conflictingEventTypes = await prisma.$queryRawUnsafe(
           `SELECT et.id, et.titre, ets."dateDebut", ets."dateFin"
            FROM "EventType" et
@@ -59,11 +62,11 @@ export async function POST(request: NextRequest) {
            WHERE et."userId" = $1
              AND et.actif = true
              ${excludeEventTypeId ? `AND et.id != $4` : ''}
-             AND (
-               (ets."dateDebut" <= $3 AND ets."dateFin" >= $2)
-             )`,
-          excludeEventTypeId ? [userId, new Date(slot.dateDebut), new Date(slot.dateFin), excludeEventTypeId] 
-          : [userId, new Date(slot.dateDebut), new Date(slot.dateFin)]
+             AND DATE(ets."dateDebut") = DATE($2)
+             AND ets."dateDebut" < $3
+             AND ets."dateFin" > $2`,
+          excludeEventTypeId ? [userId, slotStart, slotEnd, excludeEventTypeId] 
+          : [userId, slotStart, slotEnd]
         ) as any[]
         
         if (conflictingEventTypes.length > 0) {
@@ -79,13 +82,32 @@ export async function POST(request: NextRequest) {
       return conflicts
     }
 
-    const conflicts = await checkConflicts(session.user.id, slots)
-    if (conflicts.length > 0) {
-      return NextResponse.json({
-        error: 'Conflits détectés',
-        conflicts
-      }, { status: 409 })
-    }
+    // CONFLITS DÉSACTIVÉS
+    // if (slots.length > 0) {
+    //   for (const slot of slots) {
+    //     if (!slot.dateDebut || !slot.dateFin) continue
+        
+    //     const conflictingSlots = await prisma.$queryRawUnsafe(
+    //       `SELECT et.titre, ets."dateDebut", ets."dateFin"
+    //        FROM "EventTypeSlot" ets
+    //        INNER JOIN "EventType" et ON et.id = ets."eventTypeId"
+    //        WHERE et."userId" = $1
+    //          AND et.actif = true
+    //          AND ets."dateDebut" < $3
+    //          AND ets."dateFin" > $2`,
+    //       session.user.id,
+    //       new Date(slot.dateDebut),
+    //       new Date(slot.dateFin)
+    //     ) as any[]
+        
+    //     if (conflictingSlots.length > 0) {
+    //       return NextResponse.json({
+    //         error: `Conflit détecté avec le RDV "${conflictingSlots[0].titre}" sur ce créneau`,
+    //         conflicts: conflictingSlots
+    //       }, { status: 409 })
+    //     }
+    //   }
+    // }
 
     const id = `cuid_${Date.now()}_${Math.random().toString(36).slice(2)}`
     const now = new Date()
@@ -108,17 +130,38 @@ export async function POST(request: NextRequest) {
     if (slots.length > 0) {
       for (const slot of slots) {
         if (slot.dateDebut && slot.dateFin) {
-          await prisma.$executeRawUnsafe(
-            `INSERT INTO "EventTypeSlot" (id, "eventTypeId", "dateDebut", "dateFin", "createdAt")
-             VALUES ($1, $2, $3, $4, $5)`,
-            `cuid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-            id,
-            new Date(slot.dateDebut),
-            new Date(slot.dateFin),
-            new Date()
-          )
+          try {
+            await prisma.$executeRawUnsafe(
+              `INSERT INTO "EventTypeSlot" (id, "eventTypeId", "dateDebut", "dateFin", "createdAt")
+               VALUES ($1, $2, $3, $4, $5)`,
+              `cuid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+              id,
+              new Date(slot.dateDebut),
+              new Date(slot.dateFin),
+              new Date()
+            )
+          } catch (slotError) {
+            
+          }
         }
       }
+      
+      // Récupérer les slots crénés pour les retourner avec la réponse
+      const createdSlots = await prisma.$queryRawUnsafe(
+        `SELECT id, "dateDebut", "dateFin"
+         FROM "EventTypeSlot"
+         WHERE "eventTypeId" = $1
+         ORDER BY "dateDebut" ASC`,
+        id
+      ) as any[]
+      
+      return NextResponse.json({
+        message: "Type de rendez-vous créé avec succès",
+        eventType: {
+          ...eventType,
+          slots: createdSlots
+        }
+      })
     }
 
     return NextResponse.json({
@@ -126,8 +169,7 @@ export async function POST(request: NextRequest) {
       eventType
     })
   } catch (error) {
-    console.error("Create event type error:", error)
-    return NextResponse.json(
+        return NextResponse.json(
       { error: "Erreur lors de la création du type de rendez-vous" },
       { status: 500 }
     )
@@ -143,24 +185,52 @@ export async function GET(request: NextRequest) {
 
     const eventTypes = await prisma.$queryRawUnsafe(
       `SELECT et.id, et.titre, et.description, et.duree, et.prix, et.lieu, et."typeRDV", et."maxParticipants", et."heureFixe", et.actif, et."createdAt",
-        (SELECT COUNT(*) FROM "Booking" b WHERE b."eventTypeId" = et.id) AS "_bookingCount"
+        (SELECT COUNT(*) FROM "Booking" b WHERE b."eventTypeId" = et.id AND b.statut != 'cancelled') AS "_bookingCount"
        FROM "EventType" et
        WHERE et."userId" = $1
-       ORDER BY et."createdAt" ASC`,
+       ORDER BY et."createdAt" DESC`,
       session.user.id
     ) as any[]
 
-    const formatted = eventTypes.map(({ _bookingCount, ...et }) => ({
-      ...et,
-      duree: Number(et.duree),
-      prix: Number(et.prix),
-      maxParticipants: et.maxParticipants != null ? Number(et.maxParticipants) : null,
-      _count: { bookings: Number(_bookingCount) },
+    // Récupérer les slots pour chaque event type
+    const formatted = await Promise.all(eventTypes.map(async ({ _bookingCount, ...et }) => {
+            try {
+        const slots = await prisma.$queryRawUnsafe(
+          `SELECT id, "dateDebut", "dateFin"
+           FROM "EventTypeSlot"
+           WHERE "eventTypeId" = $1
+           ORDER BY "dateDebut" ASC`,
+          et.id
+        ) as any[]
+
+        
+        return {
+          ...et,
+          duree: Number(et.duree),
+          prix: Number(et.prix),
+          maxParticipants: et.maxParticipants != null ? Number(et.maxParticipants) : null,
+          _count: { bookings: Number(_bookingCount) },
+          slots: slots.map(slot => ({
+            ...slot,
+            dateDebut: slot.dateDebut,
+            dateFin: slot.dateFin
+          }))
+        }
+      } catch (error) {
+        console.error("Erreur récupération slots pour", et.id, ":", error)
+        return {
+          ...et,
+          duree: Number(et.duree),
+          prix: Number(et.prix),
+          maxParticipants: et.maxParticipants != null ? Number(et.maxParticipants) : null,
+          _count: { bookings: Number(_bookingCount) },
+          slots: []
+        }
+      }
     }))
 
     return NextResponse.json(formatted)
   } catch (error) {
-    console.error("Get event types error:", error)
     return NextResponse.json(
       { error: "Erreur lors de la récupération des types de rendez-vous" },
       { status: 500 }

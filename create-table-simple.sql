@@ -1,0 +1,7 @@
+CREATE TABLE "EventTypeSlot" (
+    "id" TEXT PRIMARY KEY,
+    "eventTypeId" TEXT NOT NULL,
+    "dateDebut" TIMESTAMP(3) NOT NULL,
+    "dateFin" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
