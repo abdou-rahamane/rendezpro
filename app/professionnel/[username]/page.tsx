@@ -10,6 +10,25 @@ import {
   ChevronLeft, ChevronRight, Video, Shield, DollarSign, User
 } from "lucide-react"
 
+interface Slot {
+  id: string
+  dateDebut: string
+  dateFin: string
+}
+
+interface EventType {
+  id: string
+  titre: string
+  description?: string
+  duree: number
+  prix: number
+  lieu: string
+  typeRDV?: string
+  maxParticipants?: number
+  heureFixe?: string
+  slots: Slot[]
+}
+
 interface Professional {
   id: string
   prenom: string
@@ -19,34 +38,12 @@ interface Professional {
   photo?: string
   specialite?: string
   ville?: string
-  tarifMoyen?: number
   noteMoyenne?: number
   totalAvis?: number
   verification: boolean
   email?: string
-  phone?: string
-  website?: string
-  experience?: number
-  eventTypes: Array<{
-    id: string
-    titre: string
-    description?: string
-    duree: number
-    prix: number
-    lieu: string
-  }>
-  availabilities: Array<{
-    jour: string
-    heureDebut: string
-    heureFin: string
-  }>
-  reviews: Array<{
-    id: string
-    clientNom: string
-    note: number
-    commentaire: string
-    date: string
-  }>
+  telephone?: string
+  eventTypes: EventType[]
 }
 
 export default function ProfessionalPage() {
@@ -55,10 +52,9 @@ export default function ProfessionalPage() {
   const username = params.username as string
 
   const [professional, setProfessional] = useState<Professional | null>(null)
-  const [step, setStep] = useState(1) // 1=type RDV, 2=date/heure, 3=infos, 4=confirmation
+  const [step, setStep] = useState(1)
   const [selectedEventType, setSelectedEventType] = useState<string | null>(null)
-  const [selectedDate, setSelectedDate] = useState<string>('')
-  const [selectedTime, setSelectedTime] = useState<string | null>(null)
+  const [selectedSlots, setSelectedSlots] = useState<Slot[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [clientInfo, setClientInfo] = useState({ nom: '', email: '', phone: '' })
 
@@ -83,30 +79,19 @@ export default function ProfessionalPage() {
 
   const selectedEventTypeData = professional.eventTypes.find(e => e.id === selectedEventType)
 
-  const generateTimeSlots = () => {
-    // Si RDV collectif avec heure fixe → retourner uniquement l'heure fixe
-    if (selectedEventTypeData?.typeRDV === 'collectif' && selectedEventTypeData?.heureFixe) {
-      return [selectedEventTypeData.heureFixe]
-    }
-    
-    // Sinon → générer les créneaux normaux
-    const slots = []
-    for (let hour = 9; hour <= 18; hour++) {
-      for (let minute = 0; minute < 60; minute += 30) {
-        slots.push(`${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`)
-      }
-    }
-    return slots
+  const toggleSlot = (slot: Slot) => {
+    setSelectedSlots(prev =>
+      prev.some(s => s.id === slot.id)
+        ? prev.filter(s => s.id !== slot.id)
+        : [...prev, slot]
+    )
   }
 
   const handleConfirm = async () => {
-    if (!selectedDate || !selectedTime || !selectedEventType || !clientInfo.nom || !clientInfo.email) return
+    if (selectedSlots.length === 0 || !selectedEventType || !clientInfo.nom || !clientInfo.email) return
     setSubmitting(true)
     try {
-      const [h, m] = selectedTime.split(':').map(Number)
-      const bookingDate = new Date(selectedDate)
-      bookingDate.setHours(h, m, 0, 0)
-      const res = await fetch('/api/booking', {
+      const res = await fetch('/api/booking/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -114,16 +99,19 @@ export default function ProfessionalPage() {
           clientEmail: clientInfo.email,
           clientTel: clientInfo.phone || null,
           clientMsg: null,
-          date: bookingDate.toISOString(),
           eventTypeId: selectedEventType,
           userId: professional.id,
+          slots: selectedSlots.map(s => ({ date: new Date(s.dateDebut).toISOString(), dateFin: new Date(s.dateFin).toISOString(), slotId: s.id })),
         }),
       })
-      if (!res.ok) throw new Error('Erreur serveur')
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Erreur serveur')
+      }
       setStep(4)
-    } catch (err) {
+    } catch (err: any) {
       console.error('Booking error:', err)
-      alert('Erreur lors de la réservation. Veuillez réessayer.')
+      alert(err.message || 'Erreur lors de la réservation. Veuillez réessayer.')
     } finally {
       setSubmitting(false)
     }
@@ -142,7 +130,7 @@ export default function ProfessionalPage() {
       <div className="bg-white border-b shadow-sm">
         <div className="max-w-3xl mx-auto px-4 py-4 flex items-center gap-4">
           <button
-            onClick={() => step > 1 && step < 4 ? setStep(step - 1) : router.back()}
+            onClick={() => { if (step === 2) setSelectedSlots([]); if (step > 1 && step < 4) setStep(step - 1); else router.back(); }}
             className="flex items-center gap-1 text-gray-500 hover:text-gray-800 transition-colors"
           >
             <ChevronLeft className="w-5 h-5" />
@@ -264,52 +252,67 @@ export default function ProfessionalPage() {
           </Card>
         )}
 
-        {/* ÉTAPE 2 : Choisir date et heure */}
+        {/* ÉTAPE 2 : Choisir un créneau */}
         {step === 2 && (
           <Card className="shadow-sm">
             <CardContent className="p-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-1">Choisissez une date et une heure</h3>
-              <p className="text-sm text-gray-500 mb-5">Sélectionnez le créneau qui vous convient</p>
+              <h3 className="text-lg font-bold text-gray-900 mb-1">Choisissez un créneau</h3>
+              <p className="text-sm text-gray-500 mb-5">Sélectionnez le créneau disponible qui vous convient</p>
 
-              <div className="mb-5">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Date du rendez-vous</label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => { setSelectedDate(e.target.value); setSelectedTime(null) }}
-                  min={new Date().toISOString().split('T')[0]}
-                  className="w-full p-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 text-gray-800"
-                />
-              </div>
-
-              {selectedDate && (
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">Heure du rendez-vous</label>
-                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                    {generateTimeSlots().map(time => (
-                      <button
-                        key={time}
-                        onClick={() => setSelectedTime(time)}
-                        disabled={selectedEventTypeData?.typeRDV === 'collectif' && Boolean(selectedEventTypeData?.heureFixe)}
-                        className={`py-2 px-1 text-sm rounded-lg border-2 transition-all font-medium ${
-                          selectedTime === time
-                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                            : 'bg-white text-gray-700 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50'
-                        } ${selectedEventTypeData?.typeRDV === 'collectif' && selectedEventTypeData?.heureFixe ? 'cursor-not-allowed opacity-90' : ''}`}
-                      >
-                        {selectedEventTypeData?.typeRDV === 'collectif' && selectedEventTypeData?.heureFixe && '🔒'} {time}
-                      </button>
-                    ))}
-                  </div>
+              {!selectedEventTypeData?.slots || selectedEventTypeData.slots.length === 0 ? (
+                <div className="text-center py-10 border-2 border-dashed border-gray-200 rounded-xl">
+                  <Calendar className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500 font-medium">Aucun créneau disponible</p>
+                  <p className="text-sm text-gray-400 mt-1">Ce professionnel n&apos;a pas encore configuré de créneaux.</p>
                 </div>
+              ) : (
+                <>
+                  <p className="text-xs text-indigo-600 font-medium mb-3">Vous pouvez sélectionner plusieurs créneaux ({selectedSlots.length} sélectionné{selectedSlots.length > 1 ? 's' : ''})</p>
+                  <div className="flex flex-col gap-3">
+                    {selectedEventTypeData.slots.map(slot => {
+                      const debut = new Date(slot.dateDebut)
+                      const fin = new Date(slot.dateFin)
+                      const isSelected = selectedSlots.some(s => s.id === slot.id)
+                      return (
+                        <button
+                          key={slot.id}
+                          onClick={() => toggleSlot(slot)}
+                          className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all text-left ${
+                            isSelected
+                              ? 'border-indigo-500 bg-indigo-50'
+                              : 'border-gray-200 hover:border-indigo-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          <div>
+                            <p className={`font-semibold capitalize ${ isSelected ? 'text-indigo-700' : 'text-gray-800'}`}>
+                              {debut.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                            </p>
+                            <p className={`text-sm mt-0.5 ${ isSelected ? 'text-indigo-600' : 'text-gray-500'}`}>
+                              {debut.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} → {fin.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                          <div className={`w-5 h-5 rounded-md border-2 shrink-0 flex items-center justify-center ${
+                            isSelected ? 'border-indigo-500 bg-indigo-500' : 'border-gray-300'
+                          }`}>
+                            {isSelected && (
+                              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
               )}
 
               <Button
                 onClick={() => setStep(3)}
-                disabled={!selectedDate || !selectedTime}
+                disabled={selectedSlots.length === 0}
                 className="w-full mt-6 bg-indigo-600 hover:bg-indigo-700 h-12 text-base"
               >
-                Continuer <ChevronRight className="w-5 h-5 ml-1" />
+                Continuer ({selectedSlots.length} créneau{selectedSlots.length > 1 ? 'x' : ''}) <ChevronRight className="w-5 h-5 ml-1" />
               </Button>
             </CardContent>
           </Card>
@@ -327,9 +330,15 @@ export default function ProfessionalPage() {
                 <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-2">Récapitulatif</p>
                 <div className="space-y-1 text-sm text-gray-700">
                   <p><span className="font-medium">Type :</span> {selectedEventTypeData?.titre}</p>
-                  <p><span className="font-medium">Date :</span> {selectedDate && new Date(selectedDate).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                  <p><span className="font-medium">Heure :</span> {selectedTime}</p>
-                  <p><span className="font-medium">Durée :</span> {selectedEventTypeData?.duree} min · <span className="font-medium">Prix :</span> {selectedEventTypeData?.prix}€</p>
+                  <p><span className="font-medium">{selectedSlots.length} créneau{selectedSlots.length > 1 ? 'x' : ''} :</span></p>
+                  <div className="pl-2 space-y-1">
+                    {selectedSlots.map(slot => (
+                      <p key={slot.id} className="capitalize text-indigo-700">
+                        • {new Date(slot.dateDebut).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })} {new Date(slot.dateDebut).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} → {new Date(slot.dateFin).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    ))}
+                  </div>
+                  <p><span className="font-medium">Durée :</span> {selectedEventTypeData?.duree} min · <span className="font-medium">Prix :</span> {selectedEventTypeData?.prix}€ × {selectedSlots.length} = {(selectedEventTypeData?.prix || 0) * selectedSlots.length}€</p>
                 </div>
               </div>
 
@@ -373,7 +382,7 @@ export default function ProfessionalPage() {
 
               <Button
                 onClick={handleConfirm}
-                disabled={submitting || !clientInfo.nom || !clientInfo.email}
+                disabled={submitting || !clientInfo.nom || !clientInfo.email || selectedSlots.length === 0}
                 className="w-full mt-5 bg-indigo-600 hover:bg-indigo-700 h-12 text-base"
               >
                 {submitting ? (
@@ -403,9 +412,15 @@ export default function ProfessionalPage() {
 
               <div className="bg-gray-50 rounded-xl p-4 text-left mb-6 space-y-2 text-sm text-gray-700">
                 <p><span className="font-medium">Type :</span> {selectedEventTypeData?.titre}</p>
-                <p><span className="font-medium">Date :</span> {selectedDate && new Date(selectedDate).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                <p><span className="font-medium">Heure :</span> {selectedTime}</p>
-                <p><span className="font-medium">Durée :</span> {selectedEventTypeData?.duree} min</p>
+                <p><span className="font-medium">{selectedSlots.length} rendez-vous réservé{selectedSlots.length > 1 ? 's' : ''} :</span></p>
+                <div className="pl-2 space-y-1">
+                  {selectedSlots.map(slot => (
+                    <p key={slot.id} className="capitalize text-indigo-700">
+                      • {new Date(slot.dateDebut).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })} à {new Date(slot.dateDebut).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  ))}
+                </div>
+                <p><span className="font-medium">Durée :</span> {selectedEventTypeData?.duree} min · <span className="font-medium">Total :</span> {(selectedEventTypeData?.prix || 0) * selectedSlots.length}€</p>
               </div>
 
               <Button onClick={() => router.push('/recherche')} className="w-full bg-indigo-600 hover:bg-indigo-700 h-12">

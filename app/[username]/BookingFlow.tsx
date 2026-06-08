@@ -3,14 +3,19 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { isBefore, startOfDay, format } from "date-fns";
+import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Clock, MapPin, Video, Phone, Euro, CheckCircle, Loader2, ChevronRight } from "lucide-react";
+import { Clock, MapPin, Video, Phone, Euro, CheckCircle, Loader2, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
 import { toast } from "sonner";
+
+type Slot = {
+  id: string;
+  dateDebut: string;
+  dateFin: string;
+};
 
 type EventType = {
   id: string;
@@ -19,12 +24,7 @@ type EventType = {
   duree: number;
   prix: number;
   lieu: string;
-};
-
-type Availability = {
-  jour: string;
-  heureDebut: string;
-  heureFin: string;
+  slots: Slot[];
 };
 
 type UserData = {
@@ -40,38 +40,21 @@ type Props = {
   data: {
     user: UserData;
     eventTypes: EventType[];
-    availabilities: Availability[];
   };
 };
-
-function generateSlots(start: string, end: string, duration: number): string[] {
-  const slots: string[] = [];
-  const [sh, sm] = start.split(":").map(Number);
-  const [eh, em] = end.split(":").map(Number);
-  let cur = sh * 60 + sm;
-  const last = eh * 60 + em - duration;
-  while (cur <= last) {
-    slots.push(
-      `${Math.floor(cur / 60).toString().padStart(2, "0")}:${(cur % 60).toString().padStart(2, "0")}`
-    );
-    cur += duration;
-  }
-  return slots;
-}
 
 function getInitials(prenom: string, nom: string) {
   return `${prenom[0] ?? ""}${nom[0] ?? ""}`.toUpperCase();
 }
 
 export default function BookingFlow({ data }: Props) {
-  const { user, eventTypes, availabilities } = data;
+  const { user, eventTypes } = data;
   const router = useRouter();
 
   const [selectedType, setSelectedType] = useState<EventType | null>(
     eventTypes.length === 1 ? eventTypes[0] : null
   );
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>();
-  const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     nom: "",
@@ -80,33 +63,12 @@ export default function BookingFlow({ data }: Props) {
     message: "",
   });
 
-  const isDateDisabled = (date: Date) => {
-    if (isBefore(date, startOfDay(new Date()))) return true;
-    const dow = date.getDay().toString();
-    return !availabilities.some((a) => a.jour === dow);
-  };
-
-  const slotsForDate = (date: Date): string[] => {
-    if (!selectedType) return [];
-    const dow = date.getDay().toString();
-    const av = availabilities.find((a) => a.jour === dow);
-    if (!av) return [];
-    return generateSlots(av.heureDebut, av.heureFin, selectedType.duree);
-  };
-
-  const slots = selectedDate ? slotsForDate(selectedDate) : [];
-
-  const canSubmit =
-    selectedType && selectedDate && selectedTime && form.nom && form.email;
+  const canSubmit = selectedType && selectedSlot && form.nom && form.email;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
     setSubmitting(true);
-
-    const [h, m] = selectedTime!.split(":").map(Number);
-    const bookingDate = new Date(selectedDate!);
-    bookingDate.setHours(h, m, 0, 0);
 
     try {
       const res = await fetch("/api/booking", {
@@ -117,7 +79,7 @@ export default function BookingFlow({ data }: Props) {
           clientEmail: form.email,
           clientTel: form.telephone,
           clientMsg: form.message,
-          date: bookingDate.toISOString(),
+          date: new Date(selectedSlot!.dateDebut).toISOString(),
           eventTypeId: selectedType!.id,
           userId: user.id,
         }),
@@ -129,8 +91,8 @@ export default function BookingFlow({ data }: Props) {
         nom: form.nom,
         email: form.email,
         type: selectedType!.titre,
-        date: format(selectedDate!, "dd MMMM yyyy", { locale: fr }),
-        heure: selectedTime!,
+        date: format(new Date(selectedSlot!.dateDebut), "dd MMMM yyyy", { locale: fr }),
+        heure: format(new Date(selectedSlot!.dateDebut), "HH:mm"),
         duree: selectedType!.duree.toString(),
         lieu: selectedType!.lieu,
         pro: `${user.prenom} ${user.nom}`,
@@ -211,8 +173,7 @@ export default function BookingFlow({ data }: Props) {
                     key={et.id}
                     onClick={() => {
                       setSelectedType(et);
-                      setSelectedDate(undefined);
-                      setSelectedTime(null);
+                      setSelectedSlot(null);
                     }}
                     className={`text-left p-4 rounded-xl border-2 transition-all ${
                       isSelected
@@ -244,58 +205,43 @@ export default function BookingFlow({ data }: Props) {
           )}
         </div>
 
-        {/* Steps 2 + 3 — Calendar + Form */}
+        {/* Steps 2 + 3 — Slots + Form */}
         {selectedType && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Step 2 — Calendar + slots */}
+            {/* Step 2 — Créneaux configurés */}
             <div>
               <h2 className="flex items-center gap-2 text-base font-semibold text-gray-900 mb-4">
                 <span className="w-7 h-7 rounded-full bg-indigo-600 text-white text-sm flex items-center justify-center font-bold">
                   2
                 </span>
-                Choisissez une date
+                Choisissez un créneau
               </h2>
               <div className="bg-white rounded-xl border border-gray-200 p-4">
-                <Calendar
-                  mode="single"
-                  selected={selectedDate}
-                  onSelect={(d) => {
-                    setSelectedDate(d);
-                    setSelectedTime(null);
-                  }}
-                  disabled={isDateDisabled}
-                  locale={fr}
-                  fromDate={new Date()}
-                  className="w-full"
-                />
-
-                {selectedDate && (
-                  <div className="mt-4 border-t pt-4">
-                    <p className="text-sm font-medium text-gray-700 mb-3">
-                      Créneaux disponibles —{" "}
-                      {format(selectedDate, "EEEE d MMMM", { locale: fr })}
-                    </p>
-                    {slots.length === 0 ? (
-                      <p className="text-sm text-gray-500">
-                        Aucun créneau disponible ce jour.
-                      </p>
-                    ) : (
-                      <div className="grid grid-cols-3 gap-2">
-                        {slots.map((t) => (
-                          <button
-                            key={t}
-                            onClick={() => setSelectedTime(t)}
-                            className={`py-2 rounded-lg text-sm font-medium border transition-all ${
-                              selectedTime === t
-                                ? "bg-indigo-600 border-indigo-600 text-white"
-                                : "border-gray-300 text-gray-700 hover:border-indigo-400"
-                            }`}
-                          >
-                            {t}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                {selectedType.slots.length === 0 ? (
+                  <div className="text-center py-10 text-gray-500">
+                    <CalendarIcon className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+                    <p className="text-sm">Aucun créneau disponible pour ce type de RDV.</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3 max-h-96 overflow-y-auto">
+                    {selectedType.slots.map((slot) => (
+                      <button
+                        key={slot.id}
+                        onClick={() => setSelectedSlot(slot)}
+                        className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
+                          selectedSlot?.id === slot.id
+                            ? "border-indigo-600 bg-indigo-50"
+                            : "border-gray-200 hover:border-indigo-300"
+                        }`}
+                      >
+                        <p className="font-medium text-sm text-gray-900 capitalize">
+                          {format(new Date(slot.dateDebut), "EEEE dd MMMM yyyy", { locale: fr })}
+                        </p>
+                        <p className="text-sm text-indigo-600 font-semibold mt-0.5">
+                          {format(new Date(slot.dateDebut), "HH:mm")} → {format(new Date(slot.dateFin), "HH:mm")}
+                        </p>
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
@@ -311,7 +257,7 @@ export default function BookingFlow({ data }: Props) {
               </h2>
               <div className="bg-white rounded-xl border border-gray-200 p-5">
                 {/* Recap */}
-                {selectedDate && selectedTime ? (
+                {selectedSlot ? (
                   <div className="bg-indigo-50 rounded-lg p-4 mb-5 border border-indigo-100">
                     <p className="text-xs font-semibold text-indigo-500 uppercase tracking-wide mb-2">
                       Récapitulatif
@@ -320,8 +266,7 @@ export default function BookingFlow({ data }: Props) {
                       {selectedType.titre} · {selectedType.duree} min
                     </p>
                     <p className="text-sm text-indigo-700 capitalize">
-                      {format(selectedDate, "EEEE d MMMM", { locale: fr })} ·{" "}
-                      {selectedTime}
+                      {format(new Date(selectedSlot.dateDebut), "EEEE dd MMMM yyyy", { locale: fr })} · {format(new Date(selectedSlot.dateDebut), "HH:mm")} → {format(new Date(selectedSlot.dateFin), "HH:mm")}
                     </p>
                     <div className="flex items-center gap-1 mt-1 text-xs text-indigo-600">
                       {selectedType.lieu.toLowerCase().includes("visio") ? (

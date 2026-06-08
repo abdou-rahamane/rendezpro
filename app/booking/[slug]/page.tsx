@@ -1,31 +1,15 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Calendar } from "@/components/ui/calendar";
-import { Calendar as CalendarIcon, Clock, MapPin, Video, CheckCircle, Euro, Loader2, Users, User, Lock } from "lucide-react";
-import { format, isBefore, startOfDay } from "date-fns";
+import { Calendar as CalendarIcon, Clock, MapPin, Video, CheckCircle, Euro, Loader2, Users, User } from "lucide-react";
+import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { toast } from "sonner";
-
-function generateTimeSlots(startTime: string, endTime: string, duration: number): string[] {
-  const slots: string[] = [];
-  const [startH, startM] = startTime.split(":").map(Number);
-  const [endH, endM] = endTime.split(":").map(Number);
-  let current = startH * 60 + startM;
-  const end = endH * 60 + endM - duration;
-  while (current <= end) {
-    const h = Math.floor(current / 60).toString().padStart(2, "0");
-    const m = (current % 60).toString().padStart(2, "0");
-    slots.push(`${h}:${m}`);
-    current += duration;
-  }
-  return slots;
-}
 
 export default function BookingPage({ params }: { params: { slug: string } }) {
   console.log('=== BOOKING PAGE LOADED ===');
@@ -126,8 +110,8 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
             <p className="text-gray-600 mb-6">Votre réservation avec {profName} a bien été enregistrée.</p>
             <div className="bg-gray-50 rounded-lg p-4 text-left space-y-2">
               <p className="text-sm"><strong>Type :</strong> {eventType.titre}</p>
-              <p className="text-sm"><strong>Date :</strong> {selectedDate && format(selectedDate, "dd MMMM yyyy", { locale: fr })}</p>
-              <p className="text-sm"><strong>Heure :</strong> {selectedTime}</p>
+              <p className="text-sm"><strong>Date :</strong> {selectedSlot && format(new Date(selectedSlot.dateDebut), "dd MMMM yyyy", { locale: fr })}</p>
+              <p className="text-sm"><strong>Heure :</strong> {selectedSlot && `${format(new Date(selectedSlot.dateDebut), "HH:mm")} → ${format(new Date(selectedSlot.dateFin), "HH:mm")}`}</p>
               <p className="text-sm"><strong>Durée :</strong> {eventType.duree} min</p>
               <p className="text-sm"><strong>Lieu :</strong> {eventType.lieu}</p>
               {eventType.prix > 0 && <p className="text-sm"><strong>Prix :</strong> {eventType.prix}€</p>}
@@ -176,26 +160,7 @@ export default function BookingPage({ params }: { params: { slug: string } }) {
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <Card className="border-0 shadow-lg">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CalendarIcon className="w-5 h-5" />Choisissez une date
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Calendar
-                mode="single"
-                selected={selectedDate}
-                onSelect={handleDateSelect}
-                disabled={isDateDisabled}
-                className="rounded-md border w-full"
-                locale={fr}
-                fromDate={new Date()}
-              />
-            </CardContent>
-          </Card>
-
+        <div className="max-w-2xl mx-auto">
           <Card className="border-0 shadow-lg">
             <CardHeader>
               <CardTitle>

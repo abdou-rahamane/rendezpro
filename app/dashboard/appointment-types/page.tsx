@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar, Clock, Menu, Home, CalendarDays, UserCheck, FileText, BarChart3, Link2, Settings, Plus, Copy, ExternalLink, Video, MapPin, Euro, Pencil, Users, User } from "lucide-react";
+import { Calendar, Clock, Menu, Home, CalendarDays, UserCheck, FileText, BarChart3, Link2, Settings, Plus, Copy, ExternalLink, Video, MapPin, Euro, Pencil, Users, User, X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 const navigationItems = [
@@ -51,6 +51,11 @@ export default function AppointmentTypesPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [slots, setSlots] = useState<TimeSlot[]>([]);
+  const [managingSlots, setManagingSlots] = useState<any | null>(null);
+  const [newSlots, setNewSlots] = useState<TimeSlot[]>([]);
+  const [savingSlots, setSavingSlots] = useState(false);
+  const [slotsManagerMode, setSlotsManagerMode] = useState<'recurring' | 'specific' | 'calendar'>('specific');
+  const [modalSlotsManagerMode, setModalSlotsManagerMode] = useState<'recurring' | 'specific' | 'calendar'>('specific');
   
   useEffect(() => {
     if (status === "unauthenticated") router.push("/auth/login");
@@ -143,12 +148,15 @@ function LocationSelector({ value, onChange }: { value: string; onChange: (value
   };
 
 // Composant de gestion des créneaux AMÉLIORÉ
-function SlotsManager({ slots, onChange, duration }: { 
+function SlotsManager({ slots, onChange, duration, defaultMode, onModeChange }: { 
   slots: TimeSlot[], 
   onChange: (slots: TimeSlot[]) => void,
-  duration: number
+  duration: number,
+  defaultMode?: 'recurring' | 'specific' | 'calendar',
+  onModeChange?: (mode: 'recurring' | 'specific' | 'calendar') => void
 }) {
-  const [mode, setMode] = useState<'recurring' | 'specific' | 'calendar'>('specific')
+  const [mode, setMode_] = useState<'recurring' | 'specific' | 'calendar'>(defaultMode || 'specific')
+  const setMode = (m: 'recurring' | 'specific' | 'calendar') => { setMode_(m); onModeChange?.(m); }
   const [recurringPattern, setRecurringPattern] = useState({
     days: [] as string[],
     startTime: '',
@@ -160,12 +168,15 @@ function SlotsManager({ slots, onChange, duration }: {
   // Mode 1: Créneaux récurrents (le plus simple)
   const generateRecurringSlots = () => {
     const newSlots: TimeSlot[] = []
-    const start = new Date(recurringPattern.startDate)
-    const end = new Date(recurringPattern.endDate)
+    const [sy, sm, sd] = recurringPattern.startDate.split('-').map(Number)
+    const [ey, em, ed] = recurringPattern.endDate.split('-').map(Number)
+    const start = new Date(sy, sm - 1, sd)
+    const end = new Date(ey, em - 1, ed)
     
     for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
-      const dayName = date.toLocaleDateString('fr-FR', { weekday: 'long' })
-      if (recurringPattern.days.includes(dayName)) {
+      const rawDay = date.toLocaleDateString('fr-FR', { weekday: 'long' })
+      const dayKey = rawDay.charAt(0).toUpperCase() + rawDay.slice(1)
+      if (recurringPattern.days.includes(dayKey)) {
         const slotDate = new Date(date)
         const [startH, startM] = recurringPattern.startTime.split(':').map(Number)
         const [endH, endM] = recurringPattern.endTime.split(':').map(Number)
@@ -181,7 +192,6 @@ function SlotsManager({ slots, onChange, duration }: {
       }
     }
     
-    // Ajouter les nouveaux créneaux SANS changer de mode
     onChange([...slots, ...newSlots])
   }
 
@@ -331,12 +341,15 @@ function SlotsManager({ slots, onChange, duration }: {
               }
               
               const newSlots: TimeSlot[] = []
-              const start = new Date(recurringPattern.startDate)
-              const end = new Date(recurringPattern.endDate)
+              const [sy, sm, sd] = recurringPattern.startDate.split('-').map(Number)
+              const [ey, em, ed] = recurringPattern.endDate.split('-').map(Number)
+              const start = new Date(sy, sm - 1, sd)
+              const end = new Date(ey, em - 1, ed)
               
               for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
-                const dayName = date.toLocaleDateString('fr-FR', { weekday: 'long' })
-                if (recurringPattern.days.includes(dayName)) {
+                const rawDay = date.toLocaleDateString('fr-FR', { weekday: 'long' })
+                const dayKey = rawDay.charAt(0).toUpperCase() + rawDay.slice(1)
+                if (recurringPattern.days.includes(dayKey)) {
                   const slotDate = new Date(date)
                   const [startH, startM] = recurringPattern.startTime.split(':').map(Number)
                   const [endH, endM] = recurringPattern.endTime.split(':').map(Number)
@@ -352,12 +365,7 @@ function SlotsManager({ slots, onChange, duration }: {
                 }
               }
               
-              // Ajouter les créneaux et vider les champs (comme le mode spécifique)
               onChange([...slots, ...newSlots])
-              
-              // Debug pour vérifier que les créneaux sont bien ajoutés
-              console.log("Créneaux réguliers ajoutés:", newSlots)
-              console.log("Total des créneaux:", [...slots, ...newSlots])
               
               // Vider les champs du mode régulier après ajout
               setRecurringPattern({
@@ -405,11 +413,13 @@ function SlotsManager({ slots, onChange, duration }: {
                   onChange([...slots, {
                     dateDebut: slotDate.toISOString().slice(0, 16),
                     dateFin: endDate.toISOString().slice(0, 16)
-                  }])
+                  }]);
                   
                   // Vider les champs après ajout
-                  (document.getElementById('specificDate') as HTMLInputElement).value = ''
-                  (document.getElementById('specificTime') as HTMLInputElement).value = ''
+                  const dateInput = document.getElementById('specificDate') as HTMLInputElement
+                  const timeInput = document.getElementById('specificTime') as HTMLInputElement
+                  if (dateInput) dateInput.value = ''
+                  if (timeInput) timeInput.value = ''
                 }
               }}
               className="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700 transition-colors"
@@ -570,6 +580,62 @@ function SlotsManager({ slots, onChange, duration }: {
     }
   };
 
+  const openSlotsModal = (et: any) => {
+    setManagingSlots(et);
+    setNewSlots([]);
+    setModalSlotsManagerMode('specific');
+  };
+
+  const handleAddSlots = async () => {
+    if (!managingSlots || newSlots.length === 0) return;
+    setSavingSlots(true);
+    try {
+      const res = await fetch(`/api/event-types/${managingSlots.id}/slots`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slots: newSlots }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setManagingSlots((prev: any) => ({ ...prev, slots: data.slots }));
+        setEventTypes(prev => prev.map(et =>
+          et.id === managingSlots.id ? { ...et, slots: data.slots } : et
+        ));
+        setNewSlots([]);
+        toast.success(`${newSlots.length} créneau(x) ajouté(s) !`);
+      } else {
+        toast.error("Erreur lors de l'ajout des créneaux");
+      }
+    } catch {
+      toast.error("Erreur réseau");
+    } finally {
+      setSavingSlots(false);
+    }
+  };
+
+  const handleDeleteSlot = async (slotId: string) => {
+    if (!managingSlots) return;
+    try {
+      const res = await fetch(`/api/event-types/${managingSlots.id}/slots`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slotId }),
+      });
+      if (res.ok) {
+        const updated = managingSlots.slots.filter((s: any) => s.id !== slotId);
+        setManagingSlots((prev: any) => ({ ...prev, slots: updated }));
+        setEventTypes(prev => prev.map(et =>
+          et.id === managingSlots.id ? { ...et, slots: updated } : et
+        ));
+        toast.success("Créneau supprimé");
+      } else {
+        toast.error("Erreur lors de la suppression");
+      }
+    } catch {
+      toast.error("Erreur réseau");
+    }
+  };
+
   const copyLink = (id: string) => {
     navigator.clipboard.writeText(`${window.location.origin}/booking/${id}`);
     toast.success("Lien copié !");
@@ -695,6 +761,9 @@ function SlotsManager({ slots, onChange, duration }: {
                     <div className="flex items-center justify-between pt-2 border-t">
                       <span className="text-xs text-gray-500">{et._count?.bookings || 0} réservation(s)</span>
                       <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => openSlotsModal(et)} title="Gérer les créneaux" className="text-purple-600 hover:text-purple-700 hover:bg-purple-50">
+                          <Calendar className="w-4 h-4" />
+                        </Button>
                         <Button variant="ghost" size="sm" onClick={() => copyLink(et.id)} title="Copier le lien">
                           <Copy className="w-4 h-4" />
                         </Button>
@@ -712,6 +781,71 @@ function SlotsManager({ slots, onChange, duration }: {
           )}
         </div>
       </div>
+
+      {/* Modal gestion des créneaux */}
+      {managingSlots && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <CardTitle className="text-lg">Créneaux — {managingSlots.titre}</CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => setManagingSlots(null)}>
+                <X className="w-4 h-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Créneaux existants */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Créneaux configurés ({managingSlots.slots?.length || 0})</h3>
+                {managingSlots.slots?.length === 0 ? (
+                  <p className="text-sm text-gray-400 italic">Aucun créneau configuré</p>
+                ) : (
+                  <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
+                    {managingSlots.slots?.map((slot: any) => (
+                      <div key={slot.id} className="flex items-center justify-between bg-purple-50 rounded-lg px-3 py-2">
+                        <div className="text-sm">
+                          <span className="font-medium text-purple-800">
+                            {new Date(slot.dateDebut).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'numeric', year: 'numeric' })}
+                          </span>
+                          <span className="text-purple-600 ml-2">
+                            {new Date(slot.dateDebut).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} → {new Date(slot.dateFin).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={() => handleDeleteSlot(slot.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 w-7 p-0">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Ajouter de nouveaux créneaux */}
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Ajouter des créneaux</h3>
+                <SlotsManager
+                  slots={newSlots}
+                  onChange={setNewSlots}
+                  duration={managingSlots.duree}
+                  defaultMode={modalSlotsManagerMode}
+                  onModeChange={setModalSlotsManagerMode}
+                />
+                {newSlots.length > 0 && (
+                  <div className="mt-4 flex items-center justify-between">
+                    <span className="text-sm text-gray-600">{newSlots.length} créneau(x) à ajouter</span>
+                    <Button
+                      onClick={handleAddSlots}
+                      disabled={savingSlots}
+                      className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                    >
+                      {savingSlots ? "Enregistrement..." : `Enregistrer ${newSlots.length} créneau(x)`}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Modal ajout */}
       {showForm && (
@@ -820,6 +954,8 @@ function SlotsManager({ slots, onChange, duration }: {
                     slots={slots} 
                     onChange={setSlots}
                     duration={parseInt(form.duration)}
+                    defaultMode={slotsManagerMode}
+                    onModeChange={setSlotsManagerMode}
                   />
                 </div>
                 

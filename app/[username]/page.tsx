@@ -23,8 +23,16 @@ export default async function ProfessionalPage({
   const user = await prisma.user.findUnique({
     where: { username },
     include: {
-      eventTypes: { where: { actif: true }, orderBy: { createdAt: "asc" } },
-      availabilities: { where: { actif: true }, orderBy: { jour: "asc" } },
+      eventTypes: {
+        where: { actif: true },
+        orderBy: { createdAt: "asc" },
+        include: {
+          slots: {
+            where: { dateDebut: { gte: new Date() } },
+            orderBy: { dateDebut: "asc" },
+          },
+        },
+      },
     },
   });
 
@@ -47,11 +55,11 @@ export default async function ProfessionalPage({
       duree: et.duree,
       prix: et.prix,
       lieu: et.lieu,
-    })),
-    availabilities: user.availabilities.map((a) => ({
-      jour: a.jour,
-      heureDebut: a.heureDebut,
-      heureFin: a.heureFin,
+      slots: et.slots.map((s) => ({
+        id: s.id,
+        dateDebut: s.dateDebut.toISOString(),
+        dateFin: s.dateFin.toISOString(),
+      })),
     })),
   };
 

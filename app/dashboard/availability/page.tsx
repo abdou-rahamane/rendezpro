@@ -17,7 +17,6 @@ const navigationItems = [
   { name: "Calendrier", icon: CalendarDays, href: "/dashboard/calendar" },
   { name: "Rendez-vous", icon: UserCheck, href: "/dashboard/appointments" },
   { name: "Types de RDV", icon: FileText, href: "/dashboard/appointment-types" },
-  { name: "Disponibilités", icon: Clock, href: "/dashboard/availability", active: true },
   { name: "Profil", icon: Settings, href: "/dashboard/profile" },
 ];
 

@@ -161,6 +161,138 @@ export async function sendBookingNotificationToPro(
   )
 }
 
+interface MultiSlotEmailData {
+  clientNom: string
+  clientEmail: string
+  clientTel?: string | null
+  clientMsg?: string | null
+  proNom: string
+  proPrenom: string
+  proEmail: string
+  eventTypeTitle: string
+  slots: Array<{ date: Date; dateFin?: Date; bookingId: string }>
+}
+
+export async function sendMultiSlotConfirmationToClient(data: MultiSlotEmailData) {
+  const slotsRows = data.slots
+    .map((s, i) => `
+      <tr style="border-bottom: 1px solid #e5e7eb;">
+        <td style="padding: 8px 0; color: #6b7280; width: 40%;">Créneau ${i + 1}</td>
+        <td style="padding: 8px 0; font-weight: bold;">
+          ${formatDate(s.date)} de ${formatTime(s.date)}${s.dateFin ? ` à ${formatTime(s.dateFin)}` : ''}
+        </td>
+      </tr>`)
+    .join("")
+
+  const cancelLinks = data.slots
+    .map(s => `<a href="${process.env.NEXTAUTH_URL}/booking/cancel/${s.bookingId}"
+        style="display:block; color: #ef4444; font-size: 13px; text-decoration: underline; margin-bottom: 4px;">
+        Annuler le créneau du ${formatDate(s.date)} à ${formatTime(s.date)}${s.dateFin ? ` (fin ${formatTime(s.dateFin)})` : ''}
+      </a>`)
+    .join("")
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+      <div style="background: #6366f1; padding: 24px; border-radius: 8px 8px 0 0;">
+        <h1 style="color: white; margin: 0; font-size: 22px;">✅ Réservation confirmée — ${data.slots.length} créneau${data.slots.length > 1 ? 'x' : ''}</h1>
+      </div>
+      <div style="background: #f9fafb; padding: 24px; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb;">
+        <p>Bonjour <strong>${data.clientNom}</strong>,</p>
+        <p>Votre réservation a bien été enregistrée. Voici le récapitulatif de vos <strong>${data.slots.length} créneau${data.slots.length > 1 ? 'x' : ''}</strong> :</p>
+
+        <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+          <tr style="border-bottom: 1px solid #e5e7eb;">
+            <td style="padding: 10px 0; color: #6b7280; width: 40%;">Professionnel</td>
+            <td style="padding: 10px 0; font-weight: bold;">${data.proPrenom} ${data.proNom}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e5e7eb;">
+            <td style="padding: 10px 0; color: #6b7280;">Type de rendez-vous</td>
+            <td style="padding: 10px 0; font-weight: bold;">${data.eventTypeTitle}</td>
+          </tr>
+          ${slotsRows}
+        </table>
+
+        <div style="margin-top: 24px;">
+          ${cancelLinks}
+        </div>
+
+        <p style="margin-top: 24px; color: #6b7280; font-size: 13px;">
+          Si vous avez des questions, contactez directement le professionnel.
+        </p>
+      </div>
+    </div>
+  `
+
+  return sendEmail(
+    data.clientEmail,
+    `Confirmation — ${data.slots.length} créneau${data.slots.length > 1 ? 'x' : ''} réservé${data.slots.length > 1 ? 's' : ''} — ${data.eventTypeTitle}`,
+    html
+  )
+}
+
+export async function sendMultiSlotNotificationToPro(data: MultiSlotEmailData) {
+  const slotsRows = data.slots
+    .map((s, i) => `
+      <tr style="border-bottom: 1px solid #e5e7eb;">
+        <td style="padding: 8px 0; color: #6b7280; width: 40%;">Créneau ${i + 1}</td>
+        <td style="padding: 8px 0; font-weight: bold;">
+          ${formatDate(s.date)} de ${formatTime(s.date)}${s.dateFin ? ` à ${formatTime(s.dateFin)}` : ''}
+        </td>
+      </tr>`)
+    .join("")
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+      <div style="background: #6366f1; padding: 24px; border-radius: 8px 8px 0 0;">
+        <h1 style="color: white; margin: 0; font-size: 22px;">📅 Nouvelle réservation — ${data.slots.length} créneau${data.slots.length > 1 ? 'x' : ''}</h1>
+      </div>
+      <div style="background: #f9fafb; padding: 24px; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb;">
+        <p>Bonjour <strong>${data.proPrenom} ${data.proNom}</strong>,</p>
+        <p><strong>${data.clientNom}</strong> vient de réserver <strong>${data.slots.length} créneau${data.slots.length > 1 ? 'x' : ''}</strong> :</p>
+
+        <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+          <tr style="border-bottom: 1px solid #e5e7eb;">
+            <td style="padding: 10px 0; color: #6b7280; width: 40%;">Client</td>
+            <td style="padding: 10px 0; font-weight: bold;">${data.clientNom}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e5e7eb;">
+            <td style="padding: 10px 0; color: #6b7280;">Email</td>
+            <td style="padding: 10px 0;">${data.clientEmail}</td>
+          </tr>
+          ${data.clientTel ? `
+          <tr style="border-bottom: 1px solid #e5e7eb;">
+            <td style="padding: 10px 0; color: #6b7280;">Téléphone</td>
+            <td style="padding: 10px 0;">${data.clientTel}</td>
+          </tr>` : ""}
+          <tr style="border-bottom: 1px solid #e5e7eb;">
+            <td style="padding: 10px 0; color: #6b7280;">Type de rendez-vous</td>
+            <td style="padding: 10px 0; font-weight: bold;">${data.eventTypeTitle}</td>
+          </tr>
+          ${slotsRows}
+          ${data.clientMsg ? `
+          <tr>
+            <td style="padding: 10px 0; color: #6b7280;">Message</td>
+            <td style="padding: 10px 0; font-style: italic;">${data.clientMsg}</td>
+          </tr>` : ""}
+        </table>
+
+        <div style="margin-top: 24px; text-align: center;">
+          <a href="${process.env.NEXTAUTH_URL}/dashboard/appointments"
+            style="background: #6366f1; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">
+            Voir mes rendez-vous
+          </a>
+        </div>
+      </div>
+    </div>
+  `
+
+  return sendEmail(
+    data.proEmail,
+    `Nouveau RDV — ${data.clientNom} — ${data.slots.length} créneau${data.slots.length > 1 ? 'x' : ''} — ${data.eventTypeTitle}`,
+    html
+  )
+}
+
 export async function sendCancellationEmail(data: {
   clientNom: string
   clientEmail: string
